@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Terminal Pro Max</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass {
+            background: rgba(20, 20, 20, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .neon-text {
+            text-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+        }
+        .gradient-border {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 1px;
+            border-radius: 12px;
+        }
+        .gradient-border-inner {
+            background: #1a1a1a;
+            border-radius: 11px;
+            height: 100%;
+        }
+        .stock-card {
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+        .stock-card:hover {
+            transform: translateX(5px);
+            border-left-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+        }
+        .positive { color: #10b981; }
+        .negative { color: #ef4444; }
+        .animate-pulse-slow {
+            animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+        .scanline::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, transparent 50%, rgba(0, 255, 0, 0.02) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+        }
+        .modal-enter {
+            animation: modalIn 0.3s ease-out;
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .toast {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body class="min-h-screen overflow-x-hidden">
+    <!-- Background Effects -->
+    <div class="fixed inset-0 z-0 pointer-events-none">
+        <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-gray-900/50 to-black"></div>
+        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"></div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="relative z-10 container mx-auto px-4 py-6 max-w-7xl">
+        
+        <!-- Header -->
+        <header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <h1 class="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mono tracking-tighter">
+                    PORTFOLIO TERMINAL <span class="text-sm align-top opacity-50">PRO MAX</span>
+                </h1>
+                <p class="text-gray-400 mt-1 text-sm mono">v2.0.4 | REAL-TIME TRACKING MODULE</p>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="exportData()" class="px-4 py-2 glass rounded-lg hover:bg-white/10 transition text-sm mono flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    JSON Export
+                </button>
+                <label class="px-4 py-2 glass rounded-lg hover:bg-white/10 transition text-sm mono flex items-center gap-2 cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    JSON Import
+                    <input type="file" id="importFile" class="hidden" accept=".json" onchange="importData(this)">
+                </label>
+                <button onclick="openAddModal()" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold transition shadow-lg shadow-blue-500/25 flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    Yeni İşlem
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            
+            <!-- Portfolio Value Card -->
+            <div class="gradient-border">
+                <div class="gradient-border-inner p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <p class="text-gray-400 text-sm mono mb-1">TOPLAM PORTFÖY DEĞERİ</p>
+                            <h2 class="text-3xl font-bold mono" id="totalValue">₺0,00</h2>
+                        </div>
+                        <div class="p-2 bg-blue-500/20 rounded-lg">
+                            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm">
+                        <span id="totalChange" class="mono font-bold">0,00%</span>
+                        <span class="text-gray-500">toplam getiri</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Day Change Card -->
+            <div class="gradient-border">
+                <div class="gradient-border-inner p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <p class="text-gray-400 text-sm mono mb-1">GÜNLÜK DEĞİŞİM</p>
+                            <h2 class="text-3xl font-bold mono" id="dayChange">₺0,00</h2>
+                        </div>
+                        <div class="p-2 bg-purple-500/20 rounded-lg">
+                            <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm">
+                        <span id="dayChangePercent" class="mono font-bold">0,00%</span>
+                        <span class="text-gray-500">bugün</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stock Count Card -->
+            <div class="gradient-border">
+                <div class="gradient-border-inner p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <p class="text-gray-400 text-sm mono mb-1">AKTİF POZİSYON</p>
+                            <h2 class="text-3xl font-bold mono" id="positionCount">0</h2>
+                        </div>
+                        <div class="p-2 bg-pink-500/20 rounded-lg">
+                            <svg class="w-6 h-6 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm">
+                        <span class="text-gray-500">hisse senedi</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="glass rounded-xl p-6">
+                <h3 class="text-lg font-semibold mb-4 mono flex items-center gap-2">
+                    <span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                    Sektör Dağılımı
+                </h3>
+                <canvas id="sectorChart" height="250"></canvas>
+            </div>
+            <div class="glass rounded-xl p-6">
+                <h3 class="text-lg font-semibold mb-4 mono flex items-center gap-2">
+                    <span class="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></span>
+                    Performans Analizi
+                </h3>
+                <canvas id="performanceChart" height="250"></canvas>
+            </div>
+        </div>
+
+        <!-- Portfolio Table -->
+        <div class="glass rounded-xl overflow-hidden">
+            <div class="p-6 border-b border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
+                <h3 class="text-xl font-bold mono">PORTFÖY DETAYLARI</h3>
+                <div class="flex gap-3 w-full md:w-auto">
+                    <div class="relative flex-1 md:w-64">
+                        <input type="text" id="searchInput" placeholder="Hisse ara..." 
+                               class="w-full px-4 py-2 bg-black/30 border border-white/10 rounded-lg focus:outline-none focus:border-blue-500 transition mono text-sm"
+                               onkeyup="filterStocks()">
+                        <svg class="w-4 h-4 absolute right-3 top-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    </div>
+                    <select id="sortSelect" onchange="sortStocks()" class="px-4 py-2 bg-black/30 border border-white/10 rounded-lg focus:outline-none focus:border-blue-500 mono text-sm">
+                        <option value="value">Değere Göre</option>
+                        <option value="change">Değişime Göre</option>
+                        <option value="name">İsme Göre</option>
+                        <option value="date">Tarihe Göre</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="bg-white/5 text-gray-400 text-xs uppercase mono">
+                        <tr>
+                            <th class="px-6 py-4">Hisse</th>
+                            <th class="px-6 py-4 text-right">Miktar</th>
+                            <th class="px-6 py-4 text-right">Ort. Maliyet</th>
+                            <th class="px-6 py-4 text-right">Güncel Fiyat</th>
+                            <th class="px-6 py-4 text-right">Toplam Değer</th>
+                            <th class="px-6 py-4 text-right">Kar/Zarar</th>
+                            <th class="px-6 py-4 text-center">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody id="portfolioTable" class="divide-y divide-white/5">
+                        <!-- Dynamic Content -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div id="emptyState" class="hidden p-12 text-center text-gray-500">
+                <svg class="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                <p class="mono">Henüz işlem eklenmemiş</p>
+                <button onclick="openAddModal()" class="mt-4 text-blue-400 hover:text-blue-300 text-sm">İlk işlemini ekle →</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Transaction Modal -->
+    <div id="addModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div class="glass rounded-2xl p-8 max-w-md w-full mx-4 modal-enter relative">
+            <button onclick="closeAddModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+            
+            <h2 class="text-2xl font-bold mb-6 mono">Yeni İşlem Ekle</h2>
+            
+            <form id="transactionForm" onsubmit="addTransaction(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2 mono">Hisse Sembolü</label>
+                    <input type="text" id="stockSymbol" required placeholder="örn: THYAO, GARAN, ASELS"
+                           class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono uppercase"
+                           oninput="this.value = this.value.toUpperCase()">
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2 mono">Miktar</label>
+                        <input type="number" id="stockQuantity" required min="1" step="1"
+                               class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2 mono">Birim Fiyat (₺)</label>
+                        <input type="number" id="stockPrice" required min="0.01" step="0.01"
+                               class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono">
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2 mono">İşlem Tarihi</label>
+                    <input type="date" id="stockDate" required
+                           class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono">
+                </div>
+                
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2 mono">Sektör (Opsiyonel)</label>
+                    <select id="stockSector" class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono">
+                        <option value="other">Diğer</option>
+                        <option value="bank">Bankacılık</option>
+                        <option value="tech">Teknoloji</option>
+                        <option value="energy">Enerji</option>
+                        <option value="aviation">Havacılık</option>
+                        <option value="defense">Savunma</option>
+                        <option value="retail">Perakende</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 rounded-lg font-bold transition transform hover:scale-[1.02] mt-6">
+                    İşlemi Kaydet
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-4 right-4 z-50 hidden">
+        <div class="glass px-6 py-4 rounded-lg border-l-4 border-green-500 flex items-center gap-3 toast">
+            <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            <span id="toastMessage" class="mono text-sm">İşlem başarılı</span>
+        </div>
+    </div>
+
+    <script>
+        // Portfolio Data Management
+        let portfolio = JSON.parse(localStorage.getItem('portfolio')) || [];
+        let currentPrices = {};
+        let sectorChart = null;
+        let performanceChart = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('stockDate').valueAsDate = new Date();
+            loadMockPrices();
+            updateUI();
+        });
+
+        // Mock Price Generator (Simulating real-time data)
+        function loadMockPrices() {
+            const symbols = [...new Set(portfolio.map(p => p.symbol))];
+            symbols.forEach(symbol => {
+                if (!currentPrices[symbol]) {
+                    // Generate realistic mock price based on symbol hash
+                    const basePrice = 10 + (symbol.charCodeAt(0) % 90);
+                    currentPrices[symbol] = basePrice + (Math.random() * 10 - 5);
+                }
+            });
+        }
+
+        // Simulate price updates
+        setInterval(() => {
+            Object.keys(currentPrices).forEach(symbol => {
+                const change = (Math.random() - 0.5) * 0.5;
+                currentPrices[symbol] = Math.max(0.01, currentPrices[symbol] + change);
+            });
+            updateUI();
+        }, 5000);
+
+        function addTransaction(e) {
+            e.preventDefault();
+            
+            const symbol = document.getElementById('stockSymbol').value.toUpperCase();
+            const quantity = parseInt(document.getElementById('stockQuantity').value);
+            const price = parseFloat(document.getElementById('stockPrice').value);
+            const date = document.getElementById('stockDate').value;
+            const sector = document.getElementById('stockSector').value;
+            
+            const transaction = {
+                id: Date.now(),
+                symbol,
+                quantity,
+                price,
+                date,
+                sector,
+                timestamp: new Date().toISOString()
+            };
+            
+            portfolio.push(transaction);
+            savePortfolio();
+            
+            // Initialize price for new stock
+            if (!currentPrices[symbol]) {
+                currentPrices[symbol] = price;
+            }
+            
+            closeAddModal();
+            showToast(`${symbol} - ${quantity} adet eklendi`);
+            document.getElementById('transactionForm').reset();
+            document.getElementById('stockDate').valueAsDate = new Date();
+            updateUI();
+        }
+
+        function deleteTransaction(id) {
+            if (confirm('Bu işlemi silmek istediğinize emin misiniz?')) {
+                portfolio = portfolio.filter(p => p.id !== id);
+                savePortfolio();
+                updateUI();
+                showToast('İşlem silindi');
+            }
+        }
+
+        function savePortfolio() {
+            localStorage.setItem('portfolio', JSON.stringify(portfolio));
+        }
+
+        function updateUI() {
+            updateStats();
+            renderTable();
+            updateCharts();
+        }
+
+        function updateStats() {
+            const grouped = groupBySymbol();
+            let totalValue = 0;
+            let totalCost = 0;
+            let dayChange = 0;
+            
+            Object.entries(grouped).forEach(([symbol, data]) => {
+                const currentPrice = currentPrices[symbol] || data.avgPrice;
+                const value = data.totalQuantity * currentPrice;
+                const cost = data.totalQuantity * data.avgPrice;
+                
+                totalValue += value;
+                totalCost += cost;
+                dayChange += (currentPrice - (currentPrices[symbol] * 0.99 || data.avgPrice)) * data.totalQuantity;
+            });
+            
+            const totalChange = totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0;
+            
+            document.getElementById('totalValue').textContent = formatCurrency(totalValue);
+            document.getElementById('totalChange').textContent = `${totalChange >= 0 ? '+' : ''}${totalChange.toFixed(2)}%`;
+            document.getElementById('totalChange').className = `mono font-bold ${totalChange >= 0 ? 'positive' : 'negative'}`;
+            
+            document.getElementById('dayChange').textContent = `${dayChange >= 0 ? '+' : ''}${formatCurrency(dayChange)}`;
+            document.getElementById('dayChange').className = `text-3xl font-bold mono ${dayChange >= 0 ? 'positive' : 'negative'}`;
+            
+            const dayChangePercent = totalValue > 0 ? (dayChange / totalValue) * 100 : 0;
+            document.getElementById('dayChangePercent').textContent = `${dayChangePercent >= 0 ? '+' : ''}${dayChangePercent.toFixed(2)}%`;
+            document.getElementById('dayChangePercent').className = `mono font-bold ${dayChangePercent >= 0 ? 'positive' : 'negative'}`;
+            
+            document.getElementById('positionCount').textContent = Object.keys(grouped).length;
+        }
+
+        function groupBySymbol() {
+            const grouped = {};
+            portfolio.forEach(p => {
+                if (!grouped[p.symbol]) {
+                    grouped[p.symbol] = {
+                        symbol: p.symbol,
+                        totalQuantity: 0,
+                        totalCost: 0,
+                        transactions: [],
+                        sector: p.sector || 'other'
+                    };
+                }
+                grouped[p.symbol].totalQuantity += p.quantity;
+                grouped[p.symbol].totalCost += p.quantity * p.price;
+                grouped[p.symbol].transactions.push(p);
+            });
+            
+            Object.values(grouped).forEach(g => {
+                g.avgPrice = g.totalCost / g.totalQuantity;
+            });
+            
+            return grouped;
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('portfolioTable');
+            const emptyState = document.getElementById('emptyState');
+            const grouped = groupBySymbol();
+            const searchTerm = document.getElementById('searchInput').value.toUpperCase();
+            const sortType = document.getElementById('sortSelect').value;
+            
+            let stocks = Object.values(grouped);
+            
+            if (searchTerm) {
+                stocks = stocks.filter(s => s.symbol.includes(searchTerm));
+            }
+            
+            // Sorting
+            stocks.sort((a, b) => {
+                switch(sortType) {
+                    case 'name': return a.symbol.localeCompare(b.symbol);
+                    case 'value': 
+                        const valA = a.totalQuantity * (currentPrices[a.symbol] || a.avgPrice);
+                        const valB = b.totalQuantity * (currentPrices[b.symbol] || b.avgPrice);
+                        return valB - valA;
+                    case 'change':
+                        const changeA = ((currentPrices[a.symbol] || a.avgPrice) - a.avgPrice) / a.avgPrice;
+                        const changeB = ((currentPrices[b.symbol] || b.avgPrice) - b.avgPrice) / b.avgPrice;
+                        return changeB - changeA;
+                    default: return 0;
+                }
+            });
+            
+            if (stocks.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+            
+            emptyState.classList.add('hidden');
+            
+            tbody.innerHTML = stocks.map(stock => {
+                const currentPrice = currentPrices[stock.symbol] || stock.avgPrice;
+                const currentValue = stock.totalQuantity * currentPrice;
+                const costBasis = stock.totalQuantity * stock.avgPrice;
+                const profit = currentValue - costBasis;
+                const profitPercent = (profit / costBasis) * 100;
+                const isProfit = profit >= 0;
+                
+                return `
+                    <tr class="stock-card hover:bg-white/5 transition cursor-pointer group">
+                        <td class="px-6 py-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center font-bold text-sm mono border border-white/10">
+                                    ${stock.symbol.substring(0, 2)}
+                                </div>
+                                <div>
+                                    <div class="font-bold mono text-lg">${stock.symbol}</div>
+                                    <div class="text-xs text-gray-500">${getSectorName(stock.sector)}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 text-right mono">${stock.totalQuantity}</td>
+                        <td class="px-6 py-4 text-right mono text-gray-400">₺${stock.avgPrice.toFixed(2)}</td>
+                        <td class="px-6 py-4 text-right mono font-bold text-blue-400">₺${currentPrice.toFixed(2)}</td>
+                        <td class="px-6 py-4 text-right mono font-bold">₺${currentValue.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</td>
+                        <td class="px-6 py-4 text-right">
+                            <div class="mono font-bold ${isProfit ? 'positive' : 'negative'}">
+                                ${isProfit ? '+' : ''}₺${profit.toLocaleString('tr-TR', {minimumFractionDigits: 2})}
+                            </div>
+                            <div class="text-xs ${isProfit ? 'positive' : 'negative'} opacity-70">
+                                ${isProfit ? '+' : ''}${profitPercent.toFixed(2)}%
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 text-center">
+                            <button onclick="deleteTransaction(${stock.transactions[0].id})" 
+                                    class="p-2 hover:bg-red-500/20 rounded-lg text-gray-400 hover:text-red-400 transition opacity-0 group-hover:opacity-100">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateCharts() {
+            const grouped = groupBySymbol();
+            
+            // Sector Distribution
+            const sectorData = {};
+            Object.values(grouped).forEach(stock => {
+                const currentPrice = currentPrices[stock.symbol] || stock.avgPrice;
+                const value = stock.totalQuantity * currentPrice;
+                sectorData[stock.sector] = (sectorData[stock.sector] || 0) + value;
+            });
+            
+            const sectorCtx = document.getElementById('sectorChart').getContext('2d');
+            if (sectorChart) sectorChart.destroy();
+            
+            sectorChart = new Chart(sectorCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(sectorData).map(getSectorName),
+                    datasets: [{
+                        data: Object.values(sectorData),
+                        backgroundColor: [
+                            '#3b82f6', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#ef4444', '#6b7280'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: '#9ca3af', font: { family: 'JetBrains Mono' } }
+                        }
+                    }
+                }
+            });
+            
+            // Performance Chart
+            const perfCtx = document.getElementById('performanceChart').getContext('2d');
+            if (performanceChart) performanceChart.destroy();
+            
+            const sortedStocks = Object.values(grouped).sort((a, b) => {
+                const changeA = ((currentPrices[a.symbol] || a.avgPrice) - a.avgPrice) / a.avgPrice;
+                const changeB = ((currentPrices[b.symbol] || b.avgPrice) - b.avgPrice) / b.avgPrice;
+                return changeB - changeA;
+            }).slice(0, 5);
+            
+            performanceChart = new Chart(perfCtx, {
+                type: 'bar',
+                data: {
+                    labels: sortedStocks.map(s => s.symbol),
+                    datasets: [{
+                        label: 'Getiri %',
+                        data: sortedStocks.map(s => ((currentPrices[s.symbol] || s.avgPrice) - s.avgPrice) / s.avgPrice * 100),
+                        backgroundColor: sortedStocks.map(s => {
+                            const change = ((currentPrices[s.symbol] || s.avgPrice) - s.avgPrice) / s.avgPrice;
+                            return change >= 0 ? '#10b981' : '#ef4444';
+                        }),
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(255,255,255,0.1)' },
+                            ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono' } }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono' } }
+                        }
+                    }
+                }
+            });
+        }
+
+        function getSectorName(sector) {
+            const names = {
+                bank: 'Bankacılık', tech: 'Teknoloji', energy: 'Enerji',
+                aviation: 'Havacılık', defense: 'Savunma', retail: 'Perakende', other: 'Diğer'
+            };
+            return names[sector] || 'Diğer';
+        }
+
+        function formatCurrency(value) {
+            return '₺' + value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function filterStocks() {
+            renderTable();
+        }
+
+        function sortStocks() {
+            renderTable();
+        }
+
+        function openAddModal() {
+            document.getElementById('addModal').classList.remove('hidden');
+            document.getElementById('addModal').classList.add('flex');
+        }
+
+        function closeAddModal() {
+            document.getElementById('addModal').classList.add('hidden');
+            document.getElementById('addModal').classList.remove('flex');
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMessage').textContent = message;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 3000);
+        }
+
+        function exportData() {
+            const dataStr = JSON.stringify(portfolio, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `portfolio_backup_${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            showToast('Veriler dışa aktarıldı');
+        }
+
+        function importData(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (Array.isArray(data)) {
+                        portfolio = data;
+                        savePortfolio();
+                        loadMockPrices();
+                        updateUI();
+                        showToast('Veriler içe aktarıldı');
+                    } else {
+                        alert('Geçersiz dosya formatı');
+                    }
+                } catch (err) {
+                    alert('Dosya okuma hatası');
+                }
+            };
+            reader.readAsText(file);
+            input.value = '';
+        }
+
+        // Close modal on outside click
+        document.getElementById('addModal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeAddModal();
+        });
+    </script>
+</body>
+</html>
