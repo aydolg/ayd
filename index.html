@@ -119,7 +119,7 @@
                 <div class="flex flex-col items-end mr-2">
                     <span id="lastUpdateTime" class="last-update mono">Henüz güncellenmedi</span>
                     <span id="updateStatus" class="text-xs text-gray-500"></span>
-                    <span id="priceSource" class="text-[10px] text-gray-600 mono">Kaynak: TradingView / Yahoo (fallback)</span>
+                    <span id="priceSource" class="text-[10px] text-gray-600 mono">Kaynak: Google Sheet / TradingView / Yahoo</span>
                 </div>
                 <button id="updateBtn" onclick="updateLivePrices()" class="update-btn px-6 py-2 rounded-lg font-semibold transition text-white flex items-center gap-2">
                     <svg id="updateIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
@@ -367,6 +367,10 @@
             'https://cors-anywhere.herokuapp.com/'
         ];
 
+        const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQeTFovlKfvEp9sPepJb9SGxf_2AgMU7eEPTDCc6WWc0o1Z1AizX6K2mJlaWtcvSderiBym7cyhEdsC/pub?gid=1621608399&single=true&output=csv';
+        const SHEET_CACHE_TTL_MS = 60000;
+        let sheetPriceCache = { data: null, loadedAt: 0 };
+
         function getProxyUrl(targetUrl, proxy) {
             return proxy + encodeURIComponent(targetUrl);
         }
@@ -405,6 +409,112 @@
             throw new Error(`Tüm veri kaynakları başarısız -> ${errors.join(' | ')}`);
         }
 
+
+
+        function parseCsvLine(line) {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+
+            for (let i = 0; i < line.length; i++) {
+                const ch = line[i];
+                if (ch === '"') {
+                    if (inQuotes && line[i + 1] === '"') {
+                        current += '"';
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (ch === ',' && !inQuotes) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += ch;
+                }
+            }
+            result.push(current);
+            return result;
+        }
+
+        function parsePriceValue(raw) {
+            if (raw === undefined || raw === null) return null;
+            let txt = String(raw).trim();
+            if (!txt) return null;
+
+            txt = txt.replace(/\s/g, '').replace(/[₺$€£]/g, '');
+            const lastComma = txt.lastIndexOf(',');
+            const lastDot = txt.lastIndexOf('.');
+
+            if (lastComma > lastDot) {
+                txt = txt.replace(/\./g, '').replace(',', '.');
+            } else {
+                txt = txt.replace(/,/g, '');
+            }
+
+            const val = Number.parseFloat(txt);
+            return Number.isFinite(val) ? val : null;
+        }
+
+        async function fetchGoogleSheetPriceMap() {
+            const now = Date.now();
+            if (sheetPriceCache.data && (now - sheetPriceCache.loadedAt) < SHEET_CACHE_TTL_MS) {
+                return sheetPriceCache.data;
+            }
+
+            const response = await fetch(GOOGLE_SHEET_CSV_URL, { headers: { 'Accept': 'text/csv' } });
+            if (!response.ok) {
+                throw new Error(`Google Sheet HTTP ${response.status}`);
+            }
+
+            const csv = await response.text();
+            const lines = csv.split(/?
+/).filter(Boolean);
+            const map = {};
+
+            for (const line of lines) {
+                const cols = parseCsvLine(line);
+                if (!cols.length) continue;
+
+                const symbol = normalizeBistSymbol(cols[0] || ''); // A sütunu
+                const price = parsePriceValue(cols[4]); // E sütunu
+
+                if (!symbol || price === null) continue;
+                map[symbol] = price;
+            }
+
+            if (!Object.keys(map).length) {
+                throw new Error('Google Sheet fiyat verisi boş veya parse edilemedi');
+            }
+
+            sheetPriceCache = { data: map, loadedAt: now };
+            return map;
+        }
+
+        async function fetchGoogleSheetData(symbol) {
+            const cleanSymbol = normalizeBistSymbol(symbol);
+            const map = await fetchGoogleSheetPriceMap();
+            const price = map[cleanSymbol];
+
+            if (!Number.isFinite(price)) {
+                throw new Error(`Google Sheet içinde ${cleanSymbol} bulunamadı`);
+            }
+
+            const sourceEl = document.getElementById('priceSource');
+            if (sourceEl) sourceEl.textContent = 'Kaynak: Google Sheet (A=Symbol, E=Fiyat)';
+
+            return {
+                symbol,
+                price,
+                previousClose: price,
+                change: 0,
+                changePercent: 0,
+                currency: 'TRY',
+                exchange: 'BIST',
+                marketState: 'LIVE',
+                source: 'Google Sheet',
+                timestamp: new Date().toISOString()
+            };
+        }
 
         function normalizeBistSymbol(symbol) {
             return symbol.toUpperCase().replace('.IS', '').trim();
@@ -460,6 +570,12 @@
 
         async function fetchLivePriceData(symbol) {
             const errors = [];
+
+            try {
+                return await fetchGoogleSheetData(symbol);
+            } catch (e) {
+                errors.push(`GoogleSheet: ${e.message}`);
+            }
 
             try {
                 return await fetchTradingViewData(symbol);
@@ -1431,7 +1547,7 @@
 
         // Debug info
         console.log('Portfolio Terminal v3.1.0 loaded');
-        console.log('Price data sources: TradingView primary, Yahoo fallback', { CORS_PROXIES });
+        console.log('Price data sources: Google Sheet primary, TradingView secondary, Yahoo fallback', { GOOGLE_SHEET_CSV_URL, CORS_PROXIES });
     </script>
 </body>
 </html>
