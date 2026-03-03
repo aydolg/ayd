@@ -119,7 +119,7 @@
                 <div class="flex flex-col items-end mr-2">
                     <span id="lastUpdateTime" class="last-update mono">Henüz güncellenmedi</span>
                     <span id="updateStatus" class="text-xs text-gray-500"></span>
-                    <span id="priceSource" class="text-[10px] text-gray-600 mono">Kaynak: Google Sheet / TradingView / Yahoo</span>
+                    <span id="priceSource" class="text-[10px] text-gray-600 mono">Kaynak: Google Sheet CSV</span>
                 </div>
                 <button id="updateBtn" onclick="updateLivePrices()" class="update-btn px-6 py-2 rounded-lg font-semibold transition text-white flex items-center gap-2">
                     <svg id="updateIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
@@ -285,10 +285,10 @@
             <form id="transactionForm" onsubmit="addTransaction(event)" class="space-y-4">
                 <div>
                     <label class="block text-sm text-gray-400 mb-2 mono">Hisse Sembolü</label>
-                    <input type="text" id="stockSymbol" required placeholder="örn: THYAO.IS, GARAN.IS, ASELS.IS"
+                    <input type="text" id="stockSymbol" required placeholder="örn: THYAO, GARAN, ASELS"
                            class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono uppercase"
                            oninput="this.value = this.value.toUpperCase()">
-                    <p class="text-xs text-gray-500 mt-1">BIST hisseleri için .IS ekleyin (örn: THYAO.IS)</p>
+                    <p class="text-xs text-gray-500 mt-1">Sembolü olduğu gibi girin (otomatik ekleme/çıkarma yapılmaz)</p>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -360,55 +360,14 @@
         let sectorChart = null;
         let performanceChart = null;
 
-        // Fiyat verisini Yahoo Finance'dan alıyoruz; tarayıcı CORS kısıtı için birden fazla proxy fallback'i var
-        const CORS_PROXIES = [
-            'https://api.allorigins.win/raw?url=',
-            'https://corsproxy.io/?',
-            'https://cors-anywhere.herokuapp.com/'
-        ];
-
+        // Fiyat verisi kaynağı: kullanıcı tarafından sağlanan Google Sheet CSV
         const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQeTFovlKfvEp9sPepJb9SGxf_2AgMU7eEPTDCc6WWc0o1Z1AizX6K2mJlaWtcvSderiBym7cyhEdsC/pub?gid=1621608399&single=true&output=csv';
         const SHEET_CACHE_TTL_MS = 60000;
         let sheetPriceCache = { data: null, loadedAt: 0 };
 
-        function getProxyUrl(targetUrl, proxy) {
-            return proxy + encodeURIComponent(targetUrl);
+        function normalizeSymbol(symbol) {
+            return String(symbol || '').toUpperCase().trim();
         }
-
-        async function fetchWithProxyFallback(targetUrl, timeoutMs = 10000) {
-            const errors = [];
-
-            for (const proxy of CORS_PROXIES) {
-                const url = getProxyUrl(targetUrl, proxy);
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-                try {
-                    const response = await fetch(url, {
-                        method: 'GET',
-                        headers: { 'Accept': 'application/json' },
-                        signal: controller.signal
-                    });
-
-                    clearTimeout(timeoutId);
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-
-                    const sourceEl = document.getElementById('priceSource');
-                    if (sourceEl) sourceEl.textContent = `Kaynak: Yahoo Finance (${new URL(proxy).hostname})`;
-
-                    return await response.json();
-                } catch (error) {
-                    clearTimeout(timeoutId);
-                    errors.push(`${new URL(proxy).hostname}: ${error.message}`);
-                }
-            }
-
-            throw new Error(`Tüm veri kaynakları başarısız -> ${errors.join(' | ')}`);
-        }
-
 
 
         function parseCsvLine(line) {
@@ -467,170 +426,12 @@
             }
 
             const csv = await response.text();
-            const lines = csv.split(/?
-/).filter(Boolean);
-            const map = {};
+            const lines = csv.split(/\r?\n/).filter(Boolean);
+                const symbol = normalizeSymbol(cols[0] || ''); // A sütunu
+            const cleanSymbol = normalizeSymbol(symbol);
 
-            for (const line of lines) {
-                const cols = parseCsvLine(line);
-                if (!cols.length) continue;
-
-                const symbol = normalizeBistSymbol(cols[0] || ''); // A sütunu
-                const price = parsePriceValue(cols[4]); // E sütunu
-
-                if (!symbol || price === null) continue;
-                map[symbol] = price;
-            }
-
-            if (!Object.keys(map).length) {
-                throw new Error('Google Sheet fiyat verisi boş veya parse edilemedi');
-            }
-
-            sheetPriceCache = { data: map, loadedAt: now };
-            return map;
-        }
-
-        async function fetchGoogleSheetData(symbol) {
-            const cleanSymbol = normalizeBistSymbol(symbol);
-            const map = await fetchGoogleSheetPriceMap();
-            const price = map[cleanSymbol];
-
-            if (!Number.isFinite(price)) {
-                throw new Error(`Google Sheet içinde ${cleanSymbol} bulunamadı`);
-            }
-
-            const sourceEl = document.getElementById('priceSource');
-            if (sourceEl) sourceEl.textContent = 'Kaynak: Google Sheet (A=Symbol, E=Fiyat)';
-
-            return {
-                symbol,
-                price,
-                previousClose: price,
-                change: 0,
-                changePercent: 0,
-                currency: 'TRY',
-                exchange: 'BIST',
-                marketState: 'LIVE',
-                source: 'Google Sheet',
-                timestamp: new Date().toISOString()
-            };
-        }
-
-        function normalizeBistSymbol(symbol) {
-            return symbol.toUpperCase().replace('.IS', '').trim();
-        }
-
-        async function fetchTradingViewData(symbol) {
-            const cleanSymbol = normalizeBistSymbol(symbol);
-            const response = await fetch('https://scanner.tradingview.com/turkey/scan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    symbols: {
-                        tickers: [`BIST:${cleanSymbol}`],
-                        query: { types: [] }
-                    },
-                    columns: ['close', 'change', 'currency', 'name', 'description']
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error(`TradingView HTTP ${response.status}`);
-            }
-
-            const json = await response.json();
-            if (!json?.data?.[0]?.d || !Array.isArray(json.data[0].d)) {
-                throw new Error('TradingView verisi alınamadı');
-            }
-
-            const [close, changePercent, currency] = json.data[0].d;
-            if (!Number.isFinite(close)) {
-                throw new Error('TradingView fiyat verisi geçersiz');
-            }
-
-            const pct = Number.isFinite(changePercent) ? changePercent : 0;
-            const previousClose = pct === -100 ? close : (close / (1 + (pct / 100)));
-
-            const sourceEl = document.getElementById('priceSource');
-            if (sourceEl) sourceEl.textContent = 'Kaynak: TradingView Turkey Scanner';
-
-            return {
-                symbol,
-                price: close,
-                previousClose,
-                change: close - previousClose,
-                changePercent: pct,
-                currency: currency || 'TRY',
-                exchange: 'BIST',
-                marketState: 'LIVE',
-                source: 'TradingView',
-                timestamp: new Date().toISOString()
-            };
-        }
-
-        async function fetchLivePriceData(symbol) {
-            const errors = [];
-
-            try {
-                return await fetchGoogleSheetData(symbol);
-            } catch (e) {
-                errors.push(`GoogleSheet: ${e.message}`);
-            }
-
-            try {
-                return await fetchTradingViewData(symbol);
-            } catch (e) {
-                errors.push(`TradingView: ${e.message}`);
-            }
-
-            try {
-                const yahoo = await fetchYahooData(symbol);
-                return { ...yahoo, source: yahoo.source || 'Yahoo Finance' };
-            } catch (e) {
-                errors.push(`Yahoo: ${e.message}`);
-            }
-
-            throw new Error(errors.join(' | '));
-        }
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            console.log('Initializing Portfolio Terminal...');
-
-            // Load portfolio
-            const saved = localStorage.getItem('portfolio');
-            if (saved) {
-                try {
-                    portfolio = JSON.parse(saved);
-                    console.log('Loaded portfolio:', portfolio.length, 'items');
-                } catch (e) {
-                    console.error('Failed to load portfolio:', e);
-                    portfolio = [];
-                }
-            }
-
-            // Load cached live data
-            const cached = localStorage.getItem('liveData');
-            const cachedTime = localStorage.getItem('liveDataTime');
-            if (cached && cachedTime) {
-                try {
-                    const age = Date.now() - parseInt(cachedTime);
-                    if (age < 300000) { // 5 minutes
-                        liveData = JSON.parse(cached);
-                        console.log('Loaded cached live data');
-                        document.getElementById('lastUpdateTime').textContent =
-                            `Son güncelleme: ${new Date(parseInt(cachedTime)).toLocaleTimeString('tr-TR')}`;
-                    }
-                } catch (e) {
-                    console.error('Failed to load cached data:', e);
-                }
-            }
-
-            // Set default date
-            const dateInput = document.getElementById('stockDate');
-            if (dateInput) {
-                dateInput.valueAsDate = new Date();
-            }
+            return await fetchGoogleSheetData(symbol);
+            return null;
 
             // Initialize charts and UI
             initCharts();
@@ -835,11 +636,6 @@
             e.preventDefault();
             e.stopPropagation();
 
-            console.log('Adding transaction...');
-
-            const symbolInput = document.getElementById('stockSymbol');
-            const quantityInput = document.getElementById('stockQuantity');
-            const priceInput = document.getElementById('stockPrice');
             const dateInput = document.getElementById('stockDate');
             const sectorInput = document.getElementById('stockSector');
 
@@ -1521,7 +1317,7 @@
 
             reader.onerror = (e) => {
                 console.error('File read error:', e);
-                alert('Dosya okunamadı');
+        console.log('Price data source: Google Sheet CSV', { GOOGLE_SHEET_CSV_URL });
                 input.value = '';
             };
 
