@@ -118,7 +118,7 @@
                 <div class="flex flex-col items-end mr-2">
                     <span id="lastUpdateTime" class="last-update mono">Henüz güncellenmedi</span>
                     <span id="updateStatus" class="text-xs text-gray-500"></span>
-                    <span id="priceSource" class="text-[10px] text-gray-600 mono">Kaynak: Google Sheet CSV</span>
+                    <span id="priceSource" class="text-[10px] text-gray-600 mono">Kaynak: Yahoo Finance (proxy)</span>
                 </div>
                 <button id="updateBtn" onclick="updateLivePrices()" class="update-btn px-6 py-2 rounded-lg font-semibold transition text-white flex items-center gap-2">
                     <svg id="updateIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
@@ -359,29 +359,78 @@
         let sectorChart = null;
         let performanceChart = null;
 
-        // Fiyat verisi kaynağı: kullanıcı tarafından sağlanan Google Sheet CSV
-        const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQeTFovlKfvEp9sPepJb9SGxf_2AgMU7eEPTDCc6WWc0o1Z1AizX6K2mJlaWtcvSderiBym7cyhEdsC/pub?gid=1621608399&single=true&output=csv';
-        const SHEET_CACHE_TTL_MS = 60000;
-        let sheetPriceCache = { data: null, loadedAt: 0 };
+        // Fiyat verisini Yahoo Finance'dan alıyoruz; tarayıcı CORS kısıtı için birden fazla proxy fallback'i var
+        const CORS_PROXIES = [
+            'https://api.allorigins.win/raw?url=',
+            'https://corsproxy.io/?',
+            'https://cors-anywhere.herokuapp.com/'
+        ];
 
-        function normalizeSymbol(symbol) {
-            return String(symbol || '').toUpperCase().trim();
+        function getProxyUrl(targetUrl, proxy) {
+            return proxy + encodeURIComponent(targetUrl);
         }
 
+        async function fetchWithProxyFallback(targetUrl, timeoutMs = 10000) {
+            const errors = [];
 
-        function parseCsvLine(line) {
-            const result = [];
-            let current = '';
-            let inQuotes = false;
+            for (const proxy of CORS_PROXIES) {
+                const url = getProxyUrl(targetUrl, proxy);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-            for (let i = 0; i < line.length; i++) {
-                const ch = line[i];
-                if (ch === '"') {
-                    if (inQuotes && line[i + 1] === '"') {
-                        current += '"';
-                        i++;
-                    } else {
-                        inQuotes = !inQuotes;
+                try {
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' },
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    const sourceEl = document.getElementById('priceSource');
+                    if (sourceEl) sourceEl.textContent = `Kaynak: Yahoo Finance (${new URL(proxy).hostname})`;
+
+                    return await response.json();
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    errors.push(`${new URL(proxy).hostname}: ${error.message}`);
+                }
+            }
+
+            throw new Error(`Tüm veri kaynakları başarısız -> ${errors.join(' | ')}`);
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Initializing Portfolio Terminal...');
+
+            // Load portfolio
+            const saved = localStorage.getItem('portfolio');
+            if (saved) {
+                try {
+                    portfolio = JSON.parse(saved);
+                    console.log('Loaded portfolio:', portfolio.length, 'items');
+                } catch (e) {
+                    console.error('Failed to load portfolio:', e);
+                    portfolio = [];
+                }
+            }
+
+            // Load cached live data
+            const cached = localStorage.getItem('liveData');
+            const cachedTime = localStorage.getItem('liveDataTime');
+            if (cached && cachedTime) {
+                try {
+                    const age = Date.now() - parseInt(cachedTime);
+                    if (age < 300000) { // 5 minutes
+                        liveData = JSON.parse(cached);
+                        console.log('Loaded cached live data');
+                        document.getElementById('lastUpdateTime').textContent =
+                            `Son güncelleme: ${new Date(parseInt(cachedTime)).toLocaleTimeString('tr-TR')}`;
                     }
                 } else if (ch === ',' && !inQuotes) {
                     result.push(current);
@@ -390,47 +439,12 @@
                     current += ch;
                 }
             }
-            result.push(current);
-            return result;
-        }
 
-        function parsePriceValue(raw) {
-            if (raw === undefined || raw === null) return null;
-            let txt = String(raw).trim();
-            if (!txt) return null;
-
-            txt = txt.replace(/\s/g, '').replace(/[₺$€£]/g, '');
-            const lastComma = txt.lastIndexOf(',');
-            const lastDot = txt.lastIndexOf('.');
-
-            if (lastComma > lastDot) {
-                txt = txt.replace(/\./g, '').replace(',', '.');
-            } else {
-                txt = txt.replace(/,/g, '');
+            // Set default date
+            const dateInput = document.getElementById('stockDate');
+            if (dateInput) {
+                dateInput.valueAsDate = new Date();
             }
-
-            const val = Number.parseFloat(txt);
-            return Number.isFinite(val) ? val : null;
-        }
-
-        async function fetchGoogleSheetPriceMap() {
-            const now = Date.now();
-            if (sheetPriceCache.data && (now - sheetPriceCache.loadedAt) < SHEET_CACHE_TTL_MS) {
-                return sheetPriceCache.data;
-            }
-
-            const response = await fetch(GOOGLE_SHEET_CSV_URL, { headers: { 'Accept': 'text/csv' } });
-            if (!response.ok) {
-                throw new Error(`Google Sheet HTTP ${response.status}`);
-            }
-
-            const csv = await response.text();
-            const lines = csv.split(/\r?\n/).filter(Boolean);
-                const symbol = normalizeSymbol(cols[0] || ''); // A sütunu
-            const cleanSymbol = normalizeSymbol(symbol);
-
-            return await fetchGoogleSheetData(symbol);
-            return null;
 
             // Initialize charts and UI
             initCharts();
@@ -439,7 +453,7 @@
             console.log('Initialization complete');
         });
 
-        // Yahoo Finance API Fetch with proxy fallback (secondary source)
+        // Yahoo Finance API Fetch with proxy fallback
         async function fetchYahooData(symbol) {
             const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`;
 
@@ -635,6 +649,11 @@
             e.preventDefault();
             e.stopPropagation();
 
+            console.log('Adding transaction...');
+
+            const symbolInput = document.getElementById('stockSymbol');
+            const quantityInput = document.getElementById('stockQuantity');
+            const priceInput = document.getElementById('stockPrice');
             const dateInput = document.getElementById('stockDate');
             const sectorInput = document.getElementById('stockSector');
 
@@ -1342,7 +1361,7 @@
 
         // Debug info
         console.log('Portfolio Terminal v3.1.0 loaded');
-        console.log('Price data sources: Google Sheet primary, TradingView secondary, Yahoo fallback', { GOOGLE_SHEET_CSV_URL, CORS_PROXIES });
+        console.log('Price data source: Yahoo Finance (with proxy fallback)', CORS_PROXIES);
     </script>
 </body>
 </html>
