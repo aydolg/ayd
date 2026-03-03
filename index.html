@@ -118,7 +118,7 @@
                 <div class="flex flex-col items-end mr-2">
                     <span id="lastUpdateTime" class="last-update mono">Henüz güncellenmedi</span>
                     <span id="updateStatus" class="text-xs text-gray-500"></span>
-                    <span id="priceSource" class="text-[10px] text-gray-600 mono">Kaynak: Google Sheet CSV</span>
+                    <span id="priceSource" class="text-[10px] text-gray-600 mono">Kaynak: Yahoo Finance (proxy)</span>
                 </div>
                 <button id="updateBtn" onclick="updateLivePrices()" class="update-btn px-6 py-2 rounded-lg font-semibold transition text-white flex items-center gap-2">
                     <svg id="updateIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
@@ -359,122 +359,49 @@
         let sectorChart = null;
         let performanceChart = null;
 
-        // Fiyat verisi kaynağı: kullanıcı tarafından sağlanan Google Sheet CSV
-        const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQeTFovlKfvEp9sPepJb9SGxf_2AgMU7eEPTDCc6WWc0o1Z1AizX6K2mJlaWtcvSderiBym7cyhEdsC/pub?gid=1621608399&single=true&output=csv';
-        const SHEET_CACHE_TTL_MS = 60000;
-        let sheetPriceCache = { data: null, loadedAt: 0 };
+        // Fiyat verisini Yahoo Finance'dan alıyoruz; tarayıcı CORS kısıtı için birden fazla proxy fallback'i var
+        const CORS_PROXIES = [
+            'https://api.allorigins.win/raw?url=',
+            'https://corsproxy.io/?',
+            'https://cors-anywhere.herokuapp.com/'
+        ];
 
-        function normalizeSymbol(symbol) {
-            return String(symbol || '').toUpperCase().trim();
+        function getProxyUrl(targetUrl, proxy) {
+            return proxy + encodeURIComponent(targetUrl);
         }
 
+        async function fetchWithProxyFallback(targetUrl, timeoutMs = 10000) {
+            const errors = [];
 
-        function parseCsvLine(line) {
-            const result = [];
-            let current = '';
-            let inQuotes = false;
+            for (const proxy of CORS_PROXIES) {
+                const url = getProxyUrl(targetUrl, proxy);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-            for (let i = 0; i < line.length; i++) {
-                const ch = line[i];
-                if (ch === '"') {
-                    if (inQuotes && line[i + 1] === '"') {
-                        current += '"';
-                        i++;
-                    } else {
-                        inQuotes = !inQuotes;
+                try {
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' },
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
-                } else if (ch === ',' && !inQuotes) {
-                    result.push(current);
-                    current = '';
-                } else {
-                    current += ch;
+
+                    const sourceEl = document.getElementById('priceSource');
+                    if (sourceEl) sourceEl.textContent = `Kaynak: Yahoo Finance (${new URL(proxy).hostname})`;
+
+                    return await response.json();
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    errors.push(`${new URL(proxy).hostname}: ${error.message}`);
                 }
             }
-            result.push(current);
-            return result;
-        }
 
-        function parsePriceValue(raw) {
-            if (raw === undefined || raw === null) return null;
-            let txt = String(raw).trim();
-            if (!txt) return null;
-
-            txt = txt.replace(/\s/g, '').replace(/[₺$€£]/g, '');
-            const lastComma = txt.lastIndexOf(',');
-            const lastDot = txt.lastIndexOf('.');
-
-            if (lastComma > lastDot) {
-                txt = txt.replace(/\./g, '').replace(',', '.');
-            } else {
-                txt = txt.replace(/,/g, '');
-            }
-
-            const val = Number.parseFloat(txt);
-            return Number.isFinite(val) ? val : null;
-        }
-
-        async function fetchGoogleSheetPriceMap() {
-            const now = Date.now();
-            if (sheetPriceCache.data && (now - sheetPriceCache.loadedAt) < SHEET_CACHE_TTL_MS) {
-                return sheetPriceCache.data;
-            }
-
-            const response = await fetch(GOOGLE_SHEET_CSV_URL, { headers: { 'Accept': 'text/csv' } });
-            if (!response.ok) {
-                throw new Error(`Google Sheet HTTP ${response.status}`);
-            }
-
-            const csv = await response.text();
-            const lines = csv.split(/\r?\n/).filter(Boolean);
-            const map = {};
-
-            for (const line of lines) {
-                const cols = parseCsvLine(line);
-                if (!cols.length) continue;
-
-                const symbol = normalizeSymbol(cols[0] || ''); // A sütunu
-                const price = parsePriceValue(cols[4]); // E sütunu
-
-                if (!symbol || price === null) continue;
-                map[symbol] = price;
-            }
-
-            if (!Object.keys(map).length) {
-                throw new Error('Google Sheet fiyat verisi boş veya parse edilemedi');
-            }
-
-            sheetPriceCache = { data: map, loadedAt: now };
-            return map;
-        }
-
-        async function fetchGoogleSheetData(symbol) {
-            const cleanSymbol = normalizeSymbol(symbol);
-            const map = await fetchGoogleSheetPriceMap();
-            const price = map[cleanSymbol];
-
-            if (!Number.isFinite(price)) {
-                throw new Error(`Google Sheet içinde ${cleanSymbol} bulunamadı`);
-            }
-
-            const sourceEl = document.getElementById('priceSource');
-            if (sourceEl) sourceEl.textContent = 'Kaynak: Google Sheet (A=Symbol, E=Fiyat)';
-
-            return {
-                symbol,
-                price,
-                previousClose: price,
-                change: 0,
-                changePercent: 0,
-                currency: 'TRY',
-                exchange: 'BIST',
-                marketState: 'LIVE',
-                source: 'Google Sheet',
-                timestamp: new Date().toISOString()
-            };
-        }
-
-        async function fetchLivePriceData(symbol) {
-            return await fetchGoogleSheetData(symbol);
+            throw new Error(`Tüm veri kaynakları başarısız -> ${errors.join(' | ')}`);
         }
 
         // Initialize
@@ -505,8 +432,11 @@
                         document.getElementById('lastUpdateTime').textContent =
                             `Son güncelleme: ${new Date(parseInt(cachedTime)).toLocaleTimeString('tr-TR')}`;
                     }
-                } catch (e) {
-                    console.error('Failed to load cached data:', e);
+                } else if (ch === ',' && !inQuotes) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += ch;
                 }
             }
 
@@ -522,8 +452,93 @@
 
             console.log('Initialization complete');
         });
+
+        // Yahoo Finance API Fetch with proxy fallback
+        async function fetchYahooData(symbol) {
+            const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`;
+
+            console.log('Fetching:', symbol, 'from Yahoo Finance');
+
+            try {
+                const data = await fetchWithProxyFallback(targetUrl, 10000);
+
+                if (!data.chart || !data.chart.result || !data.chart.result[0]) {
+                    throw new Error('Invalid data structure from Yahoo');
+                }
+
+                const result = data.chart.result[0];
+                const meta = result.meta;
+
+                // Extract price data
+                const currentPrice = meta.regularMarketPrice || meta.previousClose || meta.chartPreviousClose;
+                const previousClose = meta.previousClose || meta.chartPreviousClose || currentPrice;
+
+                if (!currentPrice) {
+                    throw new Error('No price data available');
+                }
+
+                return {
+                    symbol: symbol,
+                    price: currentPrice,
+                    previousClose: previousClose,
+                    change: currentPrice - previousClose,
+                    changePercent: ((currentPrice - previousClose) / previousClose) * 100,
+                    currency: meta.currency || 'TRY',
+                    exchange: meta.exchangeName || 'Unknown',
+                    marketState: meta.marketState || 'Unknown',
+                    source: 'Yahoo Finance',
+                    timestamp: new Date().toISOString()
+                };
+
+            } catch (error) {
+                console.error(`Failed to fetch ${symbol}:`, error.message);
+                throw error;
+            }
+        }
+
+        // Fetch additional stock info
         async function fetchStockInfo(symbol) {
-            return null;
+            const targetUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=summaryDetail,defaultKeyStatistics,price`;
+
+            try {
+                const data = await fetchWithProxyFallback(targetUrl, 10000);
+
+                if (!data.quoteSummary || !data.quoteSummary.result || !data.quoteSummary.result[0]) {
+                    return null;
+                }
+
+                const modules = data.quoteSummary.result[0];
+                const summary = modules.summaryDetail || {};
+                const stats = modules.defaultKeyStatistics || {};
+                const price = modules.price || {};
+
+                // Helper to format numbers
+                const fmt = (obj, key) => {
+                    if (!obj || !obj[key]) return 'N/A';
+                    if (obj[key].fmt) return obj[key].fmt;
+                    if (obj[key].raw) return obj[key].raw.toString();
+                    return 'N/A';
+                };
+
+                return {
+                    marketCap: fmt(stats, 'marketCap') || fmt(summary, 'marketCap'),
+                    peRatio: fmt(summary, 'trailingPE'),
+                    forwardPE: fmt(summary, 'forwardPE'),
+                    dividendYield: summary.dividendYield?.raw ?
+                        (summary.dividendYield.raw * 100).toFixed(2) + '%' : 'N/A',
+                    beta: fmt(summary, 'beta'),
+                    fiftyTwoWeekHigh: fmt(summary, 'fiftyTwoWeekHigh'),
+                    fiftyTwoWeekLow: fmt(summary, 'fiftyTwoWeekLow'),
+                    averageVolume: fmt(summary, 'averageVolume'),
+                    sector: price.sector || 'N/A',
+                    industry: price.industry || 'N/A',
+                    website: price.website || 'N/A',
+                    longName: price.longName || symbol
+                };
+            } catch (e) {
+                console.warn('Info fetch failed:', e);
+                return null;
+            }
         }
 
         // Update prices with UI feedback
@@ -659,6 +674,11 @@
                 return;
             }
 
+            // Auto-add .IS for BIST stocks if no exchange specified
+            if (!symbol.includes('.') && /^[A-Z]{3,5}$/.test(symbol)) {
+                // Check if looks like Turkish stock (common patterns)
+                symbol = symbol + '.IS';
+            }
 
             const transaction = {
                 id: Date.now(),
@@ -1314,8 +1334,8 @@
             };
 
             reader.onerror = (e) => {
-                console.error('File read error:', e);
-                alert('Dosya okunamadı');
+        console.log('Portfolio Terminal loaded');
+        console.log('Price data source: Google Sheet CSV', { GOOGLE_SHEET_CSV_URL });
                 input.value = '';
             };
 
@@ -1340,8 +1360,8 @@
         });
 
         // Debug info
-        console.log('Portfolio Terminal loaded');
-        console.log('Price data source: Google Sheet CSV', { GOOGLE_SHEET_CSV_URL });
+        console.log('Portfolio Terminal v3.1.0 loaded');
+        console.log('Price data source: Yahoo Finance (with proxy fallback)', CORS_PROXIES);
     </script>
 </body>
 </html>
