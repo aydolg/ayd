@@ -113,6 +113,7 @@
                 <h1 class="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mono tracking-tighter">
                     PORTFOLIO TERMINAL <span class="text-sm align-top opacity-50">PRO MAX</span>
                 </h1>
+                <p class="text-gray-400 mt-1 text-sm mono">v3.1.0 | LIVE MARKET DATA</p>
             </div>
             <div class="flex gap-3 flex-wrap items-center">
                 <div class="flex flex-col items-end mr-2">
@@ -284,10 +285,10 @@
             <form id="transactionForm" onsubmit="addTransaction(event)" class="space-y-4">
                 <div>
                     <label class="block text-sm text-gray-400 mb-2 mono">Hisse Sembolü</label>
-                    <input type="text" id="stockSymbol" required placeholder="örn: THYAO, GARAN, ASELS"
+                    <input type="text" id="stockSymbol" required placeholder="örn: THYAO.IS, GARAN.IS, ASELS.IS"
                            class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono uppercase"
                            oninput="this.value = this.value.toUpperCase()">
-                    <p class="text-xs text-gray-500 mt-1">Sembolü olduğu gibi girin (otomatik ekleme/çıkarma yapılmaz)</p>
+                    <p class="text-xs text-gray-500 mt-1">BIST hisseleri için .IS ekleyin (örn: THYAO.IS)</p>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -432,11 +433,8 @@
                         document.getElementById('lastUpdateTime').textContent =
                             `Son güncelleme: ${new Date(parseInt(cachedTime)).toLocaleTimeString('tr-TR')}`;
                     }
-                } else if (ch === ',' && !inQuotes) {
-                    result.push(current);
-                    current = '';
-                } else {
-                    current += ch;
+                } catch (e) {
+                    console.error('Failed to load cached data:', e);
                 }
             }
 
@@ -486,7 +484,6 @@
                     currency: meta.currency || 'TRY',
                     exchange: meta.exchangeName || 'Unknown',
                     marketState: meta.marketState || 'Unknown',
-                    source: 'Yahoo Finance',
                     timestamp: new Date().toISOString()
                 };
 
@@ -574,7 +571,7 @@
                 status.textContent = `${i+1}/${symbols.length}: ${symbol}...`;
 
                 try {
-                    const data = await fetchLivePriceData(symbol);
+                    const data = await fetchYahooData(symbol);
                     liveData[symbol] = data;
                     successCount++;
                     console.log('✓', symbol, '@', data.price.toFixed(2));
@@ -1334,8 +1331,8 @@
             };
 
             reader.onerror = (e) => {
-        console.log('Portfolio Terminal loaded');
-        console.log('Price data source: Google Sheet CSV', { GOOGLE_SHEET_CSV_URL });
+                console.error('File read error:', e);
+                alert('Dosya okunamadı');
                 input.value = '';
             };
 
