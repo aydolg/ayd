@@ -338,6 +338,7 @@ function updateUI() {
     }
 }
 
+// DÜZELTİLMİŞ Günlük Değişim Hesaplama
 function updateStats() {
     const grouped = groupBySymbol();
     let totalValue = 0;
@@ -354,17 +355,32 @@ function updateStats() {
         totalValue += value;
         totalCost += cost;
 
+        // GÜNLÜK DEĞİŞİM HESAPLAMA - DÜZELTİLDİ
         if (live && !live.isFallback) {
+            // KONTROL: change değeri çok büyük mü?
+            if (Math.abs(live.change) > 1000) {
+                console.warn(`${symbol} için çok büyük change değeri:`, live.change);
+                console.log('Ham veri:', live);
+            }
+            
+            // DOĞRU HESAPLAMA: Hisse başı değişim * adet sayısı
             const dayChangeForStock = live.change * data.totalQuantity;
             totalDayChange += dayChangeForStock;
             
-            console.log(`${symbol}: Günlük değişim ${live.change} TL * ${data.totalQuantity} = ${dayChangeForStock.toFixed(2)} TL`);
+            console.log(`${symbol}:`, {
+                changePerShare: live.change,
+                quantity: data.totalQuantity,
+                totalChange: dayChangeForStock,
+                currentPrice: currentPrice
+            });
         }
     });
 
-    const totalChange = totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0;
+    // Toplam değer ve yüzde hesaplamaları
+    const totalChangePercent = totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0;
     const dayChangePercent = totalValue > 0 ? (totalDayChange / totalValue) * 100 : 0;
 
+    // UI elementlerini güncelle
     const totalValueEl = document.getElementById('totalValue');
     const totalChangeEl = document.getElementById('totalChange');
     const dayChangeEl = document.getElementById('dayChange');
@@ -374,8 +390,8 @@ function updateStats() {
     if (totalValueEl) totalValueEl.textContent = formatCurrency(totalValue);
 
     if (totalChangeEl) {
-        totalChangeEl.textContent = `${totalChange >= 0 ? '+' : ''}${totalChange.toFixed(2)}%`;
-        totalChangeEl.className = `mono font-bold ${totalChange >= 0 ? 'positive' : 'negative'}`;
+        totalChangeEl.textContent = `${totalChangePercent >= 0 ? '+' : ''}${totalChangePercent.toFixed(2)}%`;
+        totalChangeEl.className = `mono font-bold ${totalChangePercent >= 0 ? 'positive' : 'negative'}`;
     }
 
     if (dayChangeEl) {
@@ -389,6 +405,50 @@ function updateStats() {
     }
 
     if (positionCountEl) positionCountEl.textContent = Object.keys(grouped).length;
+
+    // Debug için konsola yazdır
+    console.log('=== GÜNLÜK DEĞİŞİM ÖZETİ ===');
+    console.log('Toplam Portföy Değeri:', formatCurrency(totalValue));
+    console.log('Toplam Maliyet:', formatCurrency(totalCost));
+    console.log('Toplam Günlük Değişim:', formatCurrency(totalDayChange));
+    console.log('Günlük Değişim %:', dayChangePercent.toFixed(2) + '%');
+    console.log('Toplam Getiri %:', totalChangePercent.toFixed(2) + '%');
+}
+
+// TEST FONKSİYONU - Konsolda çalıştırmak için
+function testDailyChange() {
+    console.log('=== GÜNLÜK DEĞİŞİM TESTİ ===');
+    console.log('Portföydeki hisseler:', portfolio.length);
+    
+    const grouped = groupBySymbol();
+    let totalDayChange = 0;
+    
+    Object.entries(grouped).forEach(([symbol, data]) => {
+        const live = liveData[symbol];
+        
+        if (live && !live.isFallback) {
+            const dayChangeForStock = live.change * data.totalQuantity;
+            totalDayChange += dayChangeForStock;
+            
+            console.log(`\n${symbol}:`);
+            console.log(`  - Adet: ${data.totalQuantity}`);
+            console.log(`  - Hisse Başı Değişim: ${live.change.toFixed(2)} TL`);
+            console.log(`  - Toplam Değişim: ${dayChangeForStock.toFixed(2)} TL`);
+            console.log(`  - Güncel Fiyat: ${live.price.toFixed(2)} TL`);
+            console.log(`  - Değişim %: ${live.changePercent.toFixed(2)}%`);
+            console.log(`  - Önceki Kapanış: ${live.previousClose.toFixed(2)} TL`);
+        } else {
+            console.log(`\n${symbol}: (Güncel veri yok, tahmini değerler kullanılıyor)`);
+        }
+    });
+    
+    console.log('\n=== TOPLAM ===');
+    console.log('TOPLAM GÜNLÜK DEĞİŞİM:', formatCurrency(totalDayChange));
+    
+    return {
+        totalDayChange: totalDayChange,
+        formatted: formatCurrency(totalDayChange)
+    };
 }
 
 function renderTable() {
