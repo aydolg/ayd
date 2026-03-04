@@ -152,15 +152,34 @@ async function fetchGoogleSheetData(symbol) {
         throw new Error(`Google Sheet içinde ${cleanSymbol} bulunamadı (denenen: ${aliases})`);
     }
 
+    // Gelen veriyi logla (debug için)
+    console.log(`${symbol} ham veri:`, data);
+
+    // Değişim değerlerini kontrol et ve düzelt
+    let change = data.change || 0;
+    let changePercent = data.changePercent || 0;
+    
+    // Eğer change değeri çok büyükse (muhtemelen yüzde olarak gelmiş)
+    if (Math.abs(change) > 1000 && Math.abs(changePercent) < 100) {
+        console.warn(`${symbol}: change değeri çok büyük (${change}), yüzde olabilir mi?`);
+        // change değeri aslında yüzde olarak gelmiş olabilir
+        // Bu durumda fiyat üzerinden hesapla
+        const calculatedChange = (data.price * changePercent) / 100;
+        if (Math.abs(calculatedChange) < Math.abs(change)) {
+            console.log(`${symbol}: change değeri düzeltildi: ${change} -> ${calculatedChange}`);
+            change = calculatedChange;
+        }
+    }
+
     const sourceEl = document.getElementById('priceSource');
     if (sourceEl) sourceEl.textContent = 'Kaynak: Google Sheet (A=Symbol, E=Fiyat, G=Değişim, H=Değişim%)';
 
     return {
         symbol,
         price: data.price,
-        previousClose: data.price - data.change,
-        change: data.change,
-        changePercent: data.changePercent,
+        previousClose: data.price - change,
+        change: change,
+        changePercent: changePercent,
         currency: 'TRY',
         exchange: 'BIST',
         marketState: 'LIVE',
