@@ -1363,7 +1363,79 @@
                 closeDetailModal();
             }
         });
+async function fetchGoogleSheetPriceMap() {
+    const now = Date.now();
+    if (sheetPriceCache.data && (now - sheetPriceCache.loadedAt) < SHEET_CACHE_TTL_MS) {
+        return sheetPriceCache.data;
+    }
 
+    const response = await fetch(GOOGLE_SHEET_CSV_URL, { headers: { 'Accept': 'text/csv' } });
+    if (!response.ok) {
+        throw new Error(`Google Sheet HTTP ${response.status}`);
+    }
+
+    const csv = await response.text();
+    const lines = csv.split(/\r?\n/).filter(Boolean);
+    const map = {};
+
+    for (const line of lines) {
+        const cols = parseCsvLine(line);
+        if (!cols.length) continue;
+
+        const symbol = normalizeSymbol(cols[0] || ''); // A sütunu
+        const price = parsePriceValue(cols[4]);        // E sütunu - Güncel Fiyat
+        const change = parsePriceValue(cols[6]);       // G sütunu - Değişim Miktarı
+        const changePercent = parsePriceValue(cols[7]); // H sütunu - Değişim Yüzdesi
+
+        if (!symbol || price === null) continue;
+
+        for (const alias of buildSymbolAliases(symbol)) {
+            map[alias] = { 
+                price, 
+                change: change || 0, 
+                changePercent: changePercent || 0 
+            };
+        }
+    }
+
+    if (!Object.keys(map).length) {
+        throw new Error('Google Sheet fiyat verisi boş veya parse edilemedi');
+    }
+
+    sheetPriceCache = { data: map, loadedAt: now };
+    return map;
+}
+
+async function fetchGoogleSheetData(symbol) {
+    const cleanSymbol = normalizeSymbol(symbol);
+    const map = await fetchGoogleSheetPriceMap();
+    const data = map[cleanSymbol];
+
+    if (!data || !Number.isFinite(data.price)) {
+        const aliases = buildSymbolAliases(cleanSymbol).join(', ');
+        throw new Error(`Google Sheet içinde ${cleanSymbol} bulunamadı (denenen: ${aliases})`);
+    }
+
+    const sourceEl = document.getElementById('priceSource');
+    if (sourceEl) sourceEl.textContent = 'Kaynak: Google Sheet (A=Symbol, E=Fiyat, G=Değişim, H=Değişim%)';
+
+    return {
+        symbol,
+        price: data.price,
+        previousClose: data.price - (data.change || 0), // Önceki kapanış = Güncel fiyat - değişim
+        change: data.change || 0,
+        changePercent: data.changePercent || 0,
+        currency: 'TRY',
+        exchange: 'BIST',
+        marketState: 'LIVE',
+        source: 'Google Sheet',
+        timestamp: new Date().toISOString()
+    };
+}
+        // Tablo satırı oluşturulurken:
+const dayChange = live ? live.change : 0;
+const dayChangePercent = live ? live.changePercent : 0;
+        
         // Debug info
         console.log('Portfolio Terminal loaded');
         console.log('Price data source: Google Sheet CSV', { GOOGLE_SHEET_CSV_URL });
