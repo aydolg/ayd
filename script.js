@@ -919,3 +919,68 @@ function importData(input) {
 
     reader.readAsText(file);
 }
+
+// ========== INITIALIZATION ==========
+
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('Initializing Portfolio Terminal...');
+
+    // Load portfolio
+    const saved = localStorage.getItem('portfolio');
+    if (saved) {
+        try {
+            portfolio = JSON.parse(saved);
+            console.log('Loaded portfolio:', portfolio.length, 'items');
+        } catch (e) {
+            console.error('Failed to load portfolio:', e);
+            portfolio = [];
+        }
+    }
+
+    // Load cached live data
+    const cached = localStorage.getItem('liveData');
+    const cachedTime = localStorage.getItem('liveDataTime');
+    if (cached && cachedTime) {
+        try {
+            const age = Date.now() - parseInt(cachedTime);
+            if (age < 300000) {
+                liveData = JSON.parse(cached);
+                console.log('Loaded cached live data');
+                document.getElementById('lastUpdateTime').textContent =
+                    `Son güncelleme: ${new Date(parseInt(cachedTime)).toLocaleTimeString('tr-TR')}`;
+            }
+        } catch (e) {
+            console.error('Failed to load cached data:', e);
+        }
+    }
+
+    // Set default date
+    const dateInput = document.getElementById('stockDate');
+    if (dateInput) {
+        dateInput.valueAsDate = new Date();
+    }
+
+    // Initialize charts and UI
+    initCharts();
+    updateUI();
+
+    console.log('Initialization complete');
+    console.log('Price data source: Google Sheet CSV (A=Symbol, E=Fiyat, G=Değişim Miktarı, H=Değişim Yüzdesi)');
+});
+
+// ========== EVENT LISTENERS ==========
+
+document.addEventListener('click', (e) => {
+    const addModal = document.getElementById('addModal');
+    const detailModal = document.getElementById('detailModal');
+
+    if (e.target === addModal) closeAddModal();
+    if (e.target === detailModal) closeDetailModal();
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeAddModal();
+        closeDetailModal();
+    }
+});
