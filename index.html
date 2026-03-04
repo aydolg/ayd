@@ -4,1065 +4,266 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Portfolio Terminal Pro Max - Live Data</title>
-    <!-- Tailwind CSS - Production için CLI önerilir, şimdilik CDN kullanıyoruz -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-    <style>
-        /* Mevcut stiller aynen kalacak */
-        body {
-            font-family: 'Inter', sans-serif;
-            background: #0a0a0a;
-            color: #e0e0e0;
-            overflow-y: auto !important;
-            height: auto !important;
-        }
-        .mono { font-family: 'JetBrains Mono', monospace; }
-        .glass {
-            background: rgba(20, 20, 20, 0.8);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        .gradient-border {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 1px;
-            border-radius: 12px;
-        }
-        .gradient-border-inner {
-            background: #1a1a1a;
-            border-radius: 11px;
-            height: 100%;
-        }
-        .stock-card {
-            transition: all 0.3s ease;
-            border-left: 3px solid transparent;
-        }
-        .stock-card:hover {
-            transform: translateX(5px);
-            border-left-color: #3b82f6;
-            background: rgba(59, 130, 246, 0.1);
-        }
-        .positive { color: #10b981; }
-        .negative { color: #ef4444; }
-        .loading {
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .5; }
-        }
-        .modal-enter { animation: modalIn 0.3s ease-out; }
-        @keyframes modalIn {
-            from { opacity: 0; transform: scale(0.95); }
-            to { opacity: 1; transform: scale(1); }
-        }
-        .toast {
-            animation: slideIn 0.3s ease-out;
-        }
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        .update-btn {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.39);
-        }
-        .update-btn:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.23);
-        }
-        .update-btn:active:not(:disabled) {
-            transform: translateY(1px);
-        }
-        .update-btn:disabled {
-            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-            cursor: not-allowed;
-            opacity: 0.7;
-        }
-        .last-update {
-            font-size: 0.75rem;
-            color: #6b7280;
-        }
-        .price-update {
-            animation: priceFlash 0.5s ease-out;
-        }
-        @keyframes priceFlash {
-            0% { background-color: rgba(59, 130, 246, 0.3); }
-            100% { background-color: transparent; }
-        }
-        .modal-hidden {
-            display: none !important;
-        }
-        .modal-flex {
-            display: flex !important;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body class="min-h-screen">
-    <!-- Tüm HTML içeriği aynen kalacak -->
-    <!-- ... (mevcut HTML yapısı) ... -->
+    <!-- Background Effects -->
+    <div class="fixed inset-0 z-0 pointer-events-none">
+        <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-gray-900/50 to-black"></div>
+        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"></div>
+    </div>
 
-    <script>
-        // Portfolio Data Management
-        let portfolio = [];
-        let liveData = {};
-        let sectorChart = null;
-        let performanceChart = null;
+    <!-- Main Container -->
+    <div class="relative z-10 container mx-auto px-4 py-6 max-w-7xl pb-24">
 
-        // Fiyat verisi kaynağı: kullanıcı tarafından sağlanan Google Sheet CSV
-        const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQeTFovlKfvEp9sPepJb9SGxf_2AgMU7eEPTDCc6WWc0o1Z1AizX6K2mJlaWtcvSderiBym7cyhEdsC/pub?gid=1621608399&single=true&output=csv';
-        const SHEET_CACHE_TTL_MS = 60000;
-        let sheetPriceCache = { data: null, loadedAt: 0 };
-
-        function normalizeSymbol(symbol) {
-            return String(symbol || '').toUpperCase().trim();
-        }
-
-        function buildSymbolAliases(symbol) {
-            const base = normalizeSymbol(symbol);
-            if (!base) return [];
-
-            const noSuffix = base.endsWith('.IS') ? base.slice(0, -3) : base;
-            const withSuffix = noSuffix + '.IS';
-
-            return [...new Set([base, noSuffix, withSuffix])];
-        }
-
-        function parseCsvLine(line) {
-            const result = [];
-            let current = '';
-            let inQuotes = false;
-
-            for (let i = 0; i < line.length; i++) {
-                const ch = line[i];
-                if (ch === '"') {
-                    if (inQuotes && line[i + 1] === '"') {
-                        current += '"';
-                        i++;
-                    } else {
-                        inQuotes = !inQuotes;
-                    }
-                } else if (ch === ',' && !inQuotes) {
-                    result.push(current);
-                    current = '';
-                } else {
-                    current += ch;
-                }
-            }
-            result.push(current);
-            return result;
-        }
-
-        function parsePriceValue(raw) {
-            if (raw === undefined || raw === null) return null;
-            let txt = String(raw).trim();
-            if (!txt) return null;
-
-            txt = txt.replace(/\s/g, '').replace(/[₺$€£]/g, '');
-            const lastComma = txt.lastIndexOf(',');
-            const lastDot = txt.lastIndexOf('.');
-
-            if (lastComma > lastDot) {
-                txt = txt.replace(/\./g, '').replace(',', '.');
-            } else {
-                txt = txt.replace(/,/g, '');
-            }
-
-            const val = Number.parseFloat(txt);
-            return Number.isFinite(val) ? val : null;
-        }
-
-        async function fetchGoogleSheetPriceMap() {
-            const now = Date.now();
-            if (sheetPriceCache.data && (now - sheetPriceCache.loadedAt) < SHEET_CACHE_TTL_MS) {
-                return sheetPriceCache.data;
-            }
-
-            try {
-                const response = await fetch(GOOGLE_SHEET_CSV_URL, { 
-                    headers: { 'Accept': 'text/csv' },
-                    cache: 'no-cache'
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`Google Sheet HTTP ${response.status}`);
-                }
-
-                const csv = await response.text();
-                const lines = csv.split(/\r?\n/).filter(Boolean);
-                const map = {};
-
-                for (const line of lines) {
-                    const cols = parseCsvLine(line);
-                    if (!cols.length) continue;
-
-                    const symbol = normalizeSymbol(cols[0] || ''); // A sütunu
-                    const price = parsePriceValue(cols[4]);        // E sütunu
-                    const change = parsePriceValue(cols[6]);       // G sütunu
-                    const changePercent = parsePriceValue(cols[7]); // H sütunu
-
-                    if (!symbol || price === null) continue;
-
-                    for (const alias of buildSymbolAliases(symbol)) {
-                        map[alias] = { 
-                            price, 
-                            change: change || 0, 
-                            changePercent: changePercent || 0 
-                        };
-                    }
-                }
-
-                if (!Object.keys(map).length) {
-                    throw new Error('Google Sheet fiyat verisi boş veya parse edilemedi');
-                }
-
-                sheetPriceCache = { data: map, loadedAt: now };
-                return map;
-            } catch (error) {
-                console.error('CSV fetch error:', error);
-                throw error;
-            }
-        }
-
-        async function fetchGoogleSheetData(symbol) {
-            const cleanSymbol = normalizeSymbol(symbol);
-            const map = await fetchGoogleSheetPriceMap();
-            const data = map[cleanSymbol];
-
-            if (!data || !Number.isFinite(data.price)) {
-                const aliases = buildSymbolAliases(cleanSymbol).join(', ');
-                throw new Error(`Google Sheet içinde ${cleanSymbol} bulunamadı (denenen: ${aliases})`);
-            }
-
-            const sourceEl = document.getElementById('priceSource');
-            if (sourceEl) sourceEl.textContent = 'Kaynak: Google Sheet (A=Symbol, E=Fiyat, G=Değişim, H=Değişim%)';
-
-            return {
-                symbol,
-                price: data.price,
-                previousClose: data.price - (data.change || 0),
-                change: data.change || 0,
-                changePercent: data.changePercent || 0,
-                currency: 'TRY',
-                exchange: 'BIST',
-                marketState: 'LIVE',
-                source: 'Google Sheet',
-                timestamp: new Date().toISOString()
-            };
-        }
-
-        async function fetchLivePriceData(symbol) {
-            return await fetchGoogleSheetData(symbol);
-        }
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            console.log('Initializing Portfolio Terminal...');
-
-            // Load portfolio
-            const saved = localStorage.getItem('portfolio');
-            if (saved) {
-                try {
-                    portfolio = JSON.parse(saved);
-                    console.log('Loaded portfolio:', portfolio.length, 'items');
-                } catch (e) {
-                    console.error('Failed to load portfolio:', e);
-                    portfolio = [];
-                }
-            }
-
-            // Load cached live data
-            const cached = localStorage.getItem('liveData');
-            const cachedTime = localStorage.getItem('liveDataTime');
-            if (cached && cachedTime) {
-                try {
-                    const age = Date.now() - parseInt(cachedTime);
-                    if (age < 300000) { // 5 minutes
-                        liveData = JSON.parse(cached);
-                        console.log('Loaded cached live data');
-                        document.getElementById('lastUpdateTime').textContent =
-                            `Son güncelleme: ${new Date(parseInt(cachedTime)).toLocaleTimeString('tr-TR')}`;
-                    }
-                } catch (e) {
-                    console.error('Failed to load cached data:', e);
-                }
-            }
-
-            // Set default date
-            const dateInput = document.getElementById('stockDate');
-            if (dateInput) {
-                dateInput.valueAsDate = new Date();
-            }
-
-            // Initialize charts and UI
-            initCharts();
-            updateUI();
-
-            console.log('Initialization complete');
-        });
-
-        async function fetchStockInfo(symbol) {
-            return null; // Bu fonksiyon şimdilik null dönebilir
-        }
-
-        // Update prices with UI feedback
-        async function updateLivePrices() {
-            const btn = document.getElementById('updateBtn');
-            const btnText = document.getElementById('updateBtnText');
-            const icon = document.getElementById('updateIcon');
-            const status = document.getElementById('updateStatus');
-
-            if (!portfolio || portfolio.length === 0) {
-                showToast('Portföy boş, önce hisse ekleyin');
-                return;
-            }
-
-            if (btn.disabled) return;
-
-            btn.disabled = true;
-            btnText.textContent = 'Güncelleniyor...';
-            icon.classList.add('animate-spin');
-            status.textContent = 'Bağlanıyor...';
-            status.className = 'text-xs text-blue-400';
-
-            const symbols = [...new Set(portfolio.map(p => p.symbol))];
-            let successCount = 0;
-            let failCount = 0;
-            const errors = [];
-
-            for (let i = 0; i < symbols.length; i++) {
-                const symbol = symbols[i];
-                status.textContent = `${i+1}/${symbols.length}: ${symbol}...`;
-
-                try {
-                    const data = await fetchLivePriceData(symbol);
-                    liveData[symbol] = data;
-                    successCount++;
-                    console.log('✓', symbol, '@', data.price.toFixed(2), 'Değişim:', data.changePercent, '%');
-                } catch (error) {
-                    console.error('✗', symbol, error.message);
-                    failCount++;
-                    errors.push(`${symbol}: ${error.message}`);
-
-                    if (!liveData[symbol]) {
-                        const stock = portfolio.find(p => p.symbol === symbol);
-                        if (stock) {
-                            liveData[symbol] = {
-                                symbol: symbol,
-                                price: stock.price,
-                                previousClose: stock.price,
-                                change: 0,
-                                changePercent: 0,
-                                isFallback: true,
-                                timestamp: new Date().toISOString()
-                            };
-                        }
-                    }
-                }
-
-                if (i < symbols.length - 1) {
-                    await new Promise(r => setTimeout(r, 1500));
-                }
-            }
-
-            try {
-                localStorage.setItem('liveData', JSON.stringify(liveData));
-                localStorage.setItem('liveDataTime', Date.now().toString());
-            } catch (e) {
-                console.error('Failed to cache data:', e);
-            }
-
-            updateUI();
-
-            btn.disabled = false;
-            btnText.textContent = 'Fiyatları Güncelle';
-            icon.classList.remove('animate-spin');
-
-            const now = new Date();
-            document.getElementById('lastUpdateTime').textContent =
-                `Son güncelleme: ${now.toLocaleTimeString('tr-TR')}`;
-
-            if (failCount === 0) {
-                status.textContent = `${successCount} hisse güncellendi`;
-                status.className = 'text-xs text-green-400';
-                showToast(`${successCount} hisse başarıyla güncellendi`);
-            } else if (successCount > 0) {
-                status.textContent = `${successCount} başarılı, ${failCount} başarısız`;
-                status.className = 'text-xs text-yellow-400';
-                showToast(`${successCount} güncellendi, ${failCount} hata`);
-                console.log('Errors:', errors);
-            } else {
-                status.textContent = 'Tüm güncellemeler başarısız';
-                status.className = 'text-xs text-red-400';
-                showToast('Güncelleme başarısız');
-                console.error('All errors:', errors);
-            }
-        }
-
-        // DÜZELTİLMİŞ: showStockDetail fonksiyonu
-        async function showStockDetail(symbol) {
-            const modal = document.getElementById('detailModal');
-            const content = document.getElementById('detailContent');
-
-            if (!modal || !content) return;
-
-            modal.classList.remove('modal-hidden');
-            modal.classList.add('modal-flex');
-
-            content.innerHTML = `
-                <div class="flex items-center justify-center h-32">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                    <span class="ml-3 text-gray-400">Detaylar yükleniyor...</span>
+        <!-- Header -->
+        <header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <h1 class="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mono tracking-tighter">
+                    PORTFOLIO TERMINAL <span class="text-sm align-top opacity-50">PRO MAX</span>
+                </h1>
+            </div>
+            <div class="flex gap-3 flex-wrap items-center">
+                <div class="flex flex-col items-end mr-2">
+                    <span id="lastUpdateTime" class="last-update mono">Henüz güncellenmedi</span>
+                    <span id="updateStatus" class="text-xs text-gray-500"></span>
+                    <span id="priceSource" class="text-[10px] text-gray-600 mono">Kaynak: Google Sheet CSV</span>
                 </div>
-            `;
+                <button id="updateBtn" onclick="updateLivePrices()" class="update-btn px-6 py-2 rounded-lg font-semibold transition text-white flex items-center gap-2">
+                    <svg id="updateIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    <span id="updateBtnText">Fiyatları Güncelle</span>
+                </button>
+                <button onclick="exportData()" class="px-4 py-2 glass rounded-lg hover:bg-white/10 transition text-sm mono flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    Export
+                </button>
+                <label class="px-4 py-2 glass rounded-lg hover:bg-white/10 transition text-sm mono flex items-center gap-2 cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    Import
+                    <input type="file" id="importFile" class="hidden" accept=".json" onchange="importData(this)">
+                </label>
+                <button onclick="openAddModal()" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold transition shadow-lg shadow-blue-500/25 flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    Yeni İşlem
+                </button>
+            </div>
+        </header>
 
-            try {
-                const grouped = groupBySymbol()[symbol];
-                // live değişkenini doğru şekilde tanımlıyoruz
-                const live = liveData[symbol];
+        <!-- Dashboard Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
 
-                if (!grouped) {
-                    content.innerHTML = '<div class="text-red-400">Hisse bulunamadı</div>';
-                    return;
-                }
-
-                let html = `
-                    <div class="flex justify-between items-start mb-6">
+            <!-- Portfolio Value Card -->
+            <div class="gradient-border">
+                <div class="gradient-border-inner p-6">
+                    <div class="flex justify-between items-start mb-4">
                         <div>
-                            <h2 class="text-3xl font-bold mono">${symbol}</h2>
-                            <p class="text-gray-400 mt-1">${symbol}</p>
+                            <p class="text-gray-400 text-sm mono mb-1">TOPLAM PORTFÖY DEĞERİ</p>
+                            <h2 class="text-3xl font-bold mono" id="totalValue">₺0,00</h2>
                         </div>
-                        <div class="text-right">
-                            <div class="text-3xl font-bold mono text-blue-400">₺${live?.price?.toFixed(2) || grouped.avgPrice.toFixed(2)}</div>
-                            ${live && !live.isFallback ? `
-                                <div class="${(live.change || 0) >= 0 ? 'positive' : 'negative'}">
-                                    ${(live.change || 0) >= 0 ? '+' : ''}${live.change?.toFixed(2) || 0}
-                                    (${(live.changePercent || 0) >= 0 ? '+' : ''}${live.changePercent?.toFixed(2) || 0}%)
-                                </div>
-                            ` : '<span class="text-xs text-yellow-500">Eski fiyat</span>'}
+                        <div class="p-2 bg-blue-500/20 rounded-lg">
+                            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                         </div>
                     </div>
-                `;
+                    <div class="flex items-center gap-2 text-sm">
+                        <span id="totalChange" class="mono font-bold">0,00%</span>
+                        <span class="text-gray-500">toplam getiri</span>
+                    </div>
+                </div>
+            </div>
 
-                html += `
-                    <div class="glass p-4 rounded-lg mb-6">
-                        <h3 class="font-bold mb-3 mono">İşlem Geçmişi</h3>
-                        <div class="space-y-2 max-h-48 overflow-y-auto">
-                            ${grouped.transactions.map(t => `
-                                <div class="flex justify-between items-center py-2 border-b border-white/5 last:border-0">
-                                    <div>
-                                        <div class="text-sm">${t.date}</div>
-                                        <div class="text-xs text-gray-500">${t.quantity} adet @ ₺${t.price.toFixed(2)}</div>
-                                    </div>
-                                    <div class="font-bold mono">₺${(t.quantity * t.price).toLocaleString('tr-TR', {minimumFractionDigits: 2})}</div>
-                                </div>
-                            `).join('')}
+            <!-- Day Change Card -->
+            <div class="gradient-border">
+                <div class="gradient-border-inner p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <p class="text-gray-400 text-sm mono mb-1">GÜNLÜK DEĞİŞİM</p>
+                            <h2 class="text-3xl font-bold mono" id="dayChange">₺0,00</h2>
+                        </div>
+                        <div class="p-2 bg-purple-500/20 rounded-lg">
+                            <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
                         </div>
                     </div>
-                `;
-
-                content.innerHTML = html;
-
-            } catch (e) {
-                content.innerHTML = `<div class="text-red-400">Hata: ${e.message}</div>`;
-            }
-        }
-
-        // Add transaction
-        function addTransaction(e) {
-            e.preventDefault();
-            e.stopPropagation();
-
-            console.log('Adding transaction...');
-
-            const symbolInput = document.getElementById('stockSymbol');
-            const quantityInput = document.getElementById('stockQuantity');
-            const priceInput = document.getElementById('stockPrice');
-            const dateInput = document.getElementById('stockDate');
-            const sectorInput = document.getElementById('stockSector');
-
-            if (!symbolInput || !quantityInput || !priceInput || !dateInput) {
-                console.error('Form elements not found');
-                showToast('Form hatası, sayfayı yenileyin');
-                return;
-            }
-
-            let symbol = symbolInput.value.toUpperCase().trim();
-            const quantity = Number(quantityInput.value);
-            const price = Number(priceInput.value);
-            const date = dateInput.value || new Date().toISOString().split('T')[0];
-            const sector = sectorInput ? sectorInput.value : 'other';
-
-            if (!symbol) {
-                showToast('Hisse sembolü girin');
-                return;
-            }
-
-            if (!Number.isFinite(quantity) || quantity <= 0) {
-                showToast('Geçerli bir miktar girin');
-                return;
-            }
-
-            if (!Number.isFinite(price) || price <= 0) {
-                showToast('Geçerli bir birim fiyat girin');
-                return;
-            }
-
-            const transaction = {
-                id: Date.now(),
-                symbol: symbol,
-                quantity: quantity,
-                price: price,
-                date: date,
-                sector: sector,
-                timestamp: new Date().toISOString()
-            };
-
-            portfolio.push(transaction);
-            savePortfolio();
-
-            if (!liveData[symbol]) {
-                liveData[symbol] = {
-                    symbol: symbol,
-                    price: price,
-                    previousClose: price,
-                    change: 0,
-                    changePercent: 0,
-                    isFallback: true,
-                    timestamp: new Date().toISOString()
-                };
-            }
-
-            closeAddModal();
-            showToast(`${symbol} - ${quantity} adet eklendi`);
-
-            symbolInput.value = '';
-            quantityInput.value = '';
-            priceInput.value = '';
-            dateInput.valueAsDate = new Date();
-            if (sectorInput) sectorInput.value = 'other';
-
-            updateUI();
-
-            setTimeout(() => {
-                updateLivePrices();
-            }, 500);
-        }
-
-        function deletePosition(symbol) {
-            if (!confirm(`${symbol} pozisyonundaki tüm işlemleri silmek istediğinize emin misiniz?`)) return;
-
-            const initialLength = portfolio.length;
-            portfolio = portfolio.filter(p => p.symbol !== symbol);
-
-            if (portfolio.length < initialLength) {
-                savePortfolio();
-                updateUI();
-                showToast(`${symbol} pozisyonu silindi`);
-            }
-        }
-
-        function savePortfolio() {
-            try {
-                localStorage.setItem('portfolio', JSON.stringify(portfolio));
-                console.log('Portfolio saved:', portfolio.length, 'items');
-            } catch (e) {
-                console.error('Failed to save portfolio:', e);
-                showToast('Kaydetme hatası');
-            }
-        }
-
-        function updateUI() {
-            try {
-                updateStats();
-                renderTable();
-                updateCharts();
-            } catch (e) {
-                console.error('UI update error:', e);
-            }
-        }
-
-        function updateStats() {
-            const grouped = groupBySymbol();
-            let totalValue = 0;
-            let totalCost = 0;
-            let dayChange = 0;
-
-            Object.entries(grouped).forEach(([symbol, data]) => {
-                const live = liveData[symbol];
-                const currentPrice = live ? live.price : data.avgPrice;
-                const prevClose = live ? live.previousClose : data.avgPrice;
-
-                const value = data.totalQuantity * currentPrice;
-                const cost = data.totalQuantity * data.avgPrice;
-
-                totalValue += value;
-                totalCost += cost;
-
-                if (live && !live.isFallback) {
-                    dayChange += (currentPrice - prevClose) * data.totalQuantity;
-                }
-            });
-
-            const totalChange = totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0;
-
-            const totalValueEl = document.getElementById('totalValue');
-            const totalChangeEl = document.getElementById('totalChange');
-            const dayChangeEl = document.getElementById('dayChange');
-            const dayChangePercentEl = document.getElementById('dayChangePercent');
-            const positionCountEl = document.getElementById('positionCount');
-
-            if (totalValueEl) totalValueEl.textContent = formatCurrency(totalValue);
-
-            if (totalChangeEl) {
-                totalChangeEl.textContent = `${totalChange >= 0 ? '+' : ''}${totalChange.toFixed(2)}%`;
-                totalChangeEl.className = `mono font-bold ${totalChange >= 0 ? 'positive' : 'negative'}`;
-            }
-
-            if (dayChangeEl) {
-                dayChangeEl.textContent = `${dayChange >= 0 ? '+' : ''}${formatCurrency(dayChange)}`;
-                dayChangeEl.className = `text-3xl font-bold mono ${dayChange >= 0 ? 'positive' : 'negative'}`;
-            }
-
-            const dayChangePercent = totalValue > 0 ? (dayChange / totalValue) * 100 : 0;
-            if (dayChangePercentEl) {
-                dayChangePercentEl.textContent = `${dayChangePercent >= 0 ? '+' : ''}${dayChangePercent.toFixed(2)}%`;
-                dayChangePercentEl.className = `mono font-bold ${dayChangePercent >= 0 ? 'positive' : 'negative'}`;
-            }
-
-            if (positionCountEl) positionCountEl.textContent = Object.keys(grouped).length;
-        }
-
-        function groupBySymbol() {
-            const grouped = {};
-            portfolio.forEach(p => {
-                if (!grouped[p.symbol]) {
-                    grouped[p.symbol] = {
-                        symbol: p.symbol,
-                        totalQuantity: 0,
-                        totalCost: 0,
-                        transactions: [],
-                        sector: p.sector || 'other'
-                    };
-                }
-                grouped[p.symbol].totalQuantity += p.quantity;
-                grouped[p.symbol].totalCost += p.quantity * p.price;
-                grouped[p.symbol].transactions.push(p);
-            });
-
-            Object.values(grouped).forEach(g => {
-                g.avgPrice = g.totalCost / g.totalQuantity;
-            });
-
-            return grouped;
-        }
-
-        function renderTable() {
-            const tbody = document.getElementById('portfolioTable');
-            const emptyState = document.getElementById('emptyState');
-
-            if (!tbody || !emptyState) return;
-
-            const grouped = groupBySymbol();
-            const searchTerm = (document.getElementById('searchInput')?.value || '').toUpperCase();
-            const sortType = document.getElementById('sortSelect')?.value || 'value';
-
-            let stocks = Object.values(grouped);
-
-            if (searchTerm) {
-                stocks = stocks.filter(s => s.symbol.includes(searchTerm));
-            }
-
-            stocks.sort((a, b) => {
-                switch(sortType) {
-                    case 'name': return a.symbol.localeCompare(b.symbol);
-                    case 'value':
-                        const valA = a.totalQuantity * (liveData[a.symbol]?.price || a.avgPrice);
-                        const valB = b.totalQuantity * (liveData[b.symbol]?.price || b.avgPrice);
-                        return valB - valA;
-                    case 'change':
-                        const changeA = liveData[a.symbol]?.changePercent || 0;
-                        const changeB = liveData[b.symbol]?.changePercent || 0;
-                        return changeB - changeA;
-                    case 'date':
-                        const lastDateA = Math.max(...a.transactions.map(t => new Date(t.date || t.timestamp || 0).getTime()));
-                        const lastDateB = Math.max(...b.transactions.map(t => new Date(t.date || t.timestamp || 0).getTime()));
-                        return lastDateB - lastDateA;
-                    default: return 0;
-                }
-            });
-
-            if (stocks.length === 0) {
-                tbody.innerHTML = '';
-                emptyState.classList.remove('hidden');
-                return;
-            }
-
-            emptyState.classList.add('hidden');
-
-            tbody.innerHTML = stocks.map(stock => {
-                const live = liveData[stock.symbol];
-                const currentPrice = live ? live.price : stock.avgPrice;
-                const previousClose = live ? live.previousClose : stock.avgPrice;
-                const currentValue = stock.totalQuantity * currentPrice;
-                const costBasis = stock.totalQuantity * stock.avgPrice;
-                const profit = currentValue - costBasis;
-                const profitPercent = (profit / costBasis) * 100;
-                const isProfit = profit >= 0;
-
-                const dayChange = live ? live.change : 0;
-                const dayChangePercent = live ? live.changePercent : 0;
-                const isDayPositive = dayChange >= 0;
-                const isFallback = live?.isFallback || false;
-
-                return `
-                    <tr class="stock-card hover:bg-white/5 transition cursor-pointer group" data-symbol="${stock.symbol}">
-                        <td class="px-6 py-4">
-                            <div class="flex items-center gap-3">
-                                <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center font-bold text-sm mono border border-white/10">
-                                    ${stock.symbol.split('.')[0].substring(0, 2)}
-                                </div>
-                                <div>
-                                    <div class="font-bold mono text-lg">${stock.symbol} ${isFallback ? '<span class="text-xs text-yellow-500 ml-1">(E)</span>' : ''}</div>
-                                    <div class="text-xs text-gray-500">${getSectorName(stock.sector)} ${live && !isFallback ? '• BIST' : ''}</div>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="px-6 py-4 text-right mono">${stock.totalQuantity}</td>
-                        <td class="px-6 py-4 text-right mono text-gray-400">₺${stock.avgPrice.toFixed(2)}</td>
-                        <td class="px-6 py-4 text-right mono font-bold text-blue-400 ${live && !isFallback ? 'price-update' : ''}">
-                            ₺${currentPrice.toFixed(2)}
-                            ${live && !isFallback ? `<div class="text-xs text-gray-500">Dün: ₺${previousClose.toFixed(2)}</div>` : ''}
-                        </td>
-                        <td class="px-6 py-4 text-right mono">
-                            ${!isFallback ? `
-                                <div class="${isDayPositive ? 'positive' : 'negative'}">
-                                    ${isDayPositive ? '+' : ''}${dayChange.toFixed(2)}
-                                </div>
-                                <div class="text-xs ${isDayPositive ? 'positive' : 'negative'} opacity-70">
-                                    ${isDayPositive ? '+' : ''}${dayChangePercent.toFixed(2)}%
-                                </div>
-                            ` : '<span class="text-gray-500 text-xs">-</span>'}
-                        </td>
-                        <td class="px-6 py-4 text-right mono font-bold">₺${currentValue.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</td>
-                        <td class="px-6 py-4 text-right">
-                            <div class="mono font-bold ${isProfit ? 'positive' : 'negative'}">
-                                ${isProfit ? '+' : ''}₺${profit.toLocaleString('tr-TR', {minimumFractionDigits: 2})}
-                            </div>
-                            <div class="text-xs ${isProfit ? 'positive' : 'negative'} opacity-70">
-                                ${isProfit ? '+' : ''}${profitPercent.toFixed(2)}%
-                            </div>
-                        </td>
-                        <td class="px-6 py-4 text-center">
-                            <button onclick="showStockDetail('${stock.symbol}')"
-                                    class="p-2 hover:bg-blue-500/20 rounded-lg text-blue-400 transition mr-2" title="Detay">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            </button>
-                            <button onclick="deletePosition('${stock.symbol}')"
-                                    class="p-2 hover:bg-red-500/20 rounded-lg text-gray-400 hover:text-red-400 transition opacity-0 group-hover:opacity-100" title="Pozisyonu sil">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                            </button>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
-        }
-
-        function closeDetailModal() {
-            const modal = document.getElementById('detailModal');
-            if (modal) {
-                modal.classList.add('modal-hidden');
-                modal.classList.remove('modal-flex');
-            }
-        }
-
-        function initCharts() {
-            try {
-                const sectorCtx = document.getElementById('sectorChart');
-                const perfCtx = document.getElementById('performanceChart');
-
-                if (!sectorCtx || !perfCtx) return;
-
-                if (sectorChart) sectorChart.destroy();
-                if (performanceChart) performanceChart.destroy();
-
-                sectorChart = new Chart(sectorCtx.getContext('2d'), {
-                    type: 'doughnut',
-                    data: {
-                        labels: [],
-                        datasets: [{
-                            data: [],
-                            backgroundColor: ['#3b82f6', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#ef4444', '#6b7280'],
-                            borderWidth: 0
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'right',
-                                labels: { color: '#9ca3af', font: { family: 'JetBrains Mono' } }
-                            }
-                        }
-                    }
-                });
-
-                performanceChart = new Chart(perfCtx.getContext('2d'), {
-                    type: 'bar',
-                    data: {
-                        labels: [],
-                        datasets: [{
-                            label: 'Getiri %',
-                            data: [],
-                            backgroundColor: [],
-                            borderRadius: 6
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            y: {
-                                grid: { color: 'rgba(255,255,255,0.1)' },
-                                ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono' } }
-                            },
-                            x: {
-                                grid: { display: false },
-                                ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono' } }
-                            }
-                        }
-                    }
-                });
-            } catch (e) {
-                console.error('Chart initialization error:', e);
-            }
-        }
-
-        function updateCharts() {
-            try {
-                const grouped = groupBySymbol();
-
-                // Sector Chart
-                const sectorData = {};
-                Object.values(grouped).forEach(stock => {
-                    const live = liveData[stock.symbol];
-                    const value = stock.totalQuantity * (live ? live.price : stock.avgPrice);
-                    sectorData[stock.sector] = (sectorData[stock.sector] || 0) + value;
-                });
-
-                if (sectorChart) {
-                    sectorChart.data.labels = Object.keys(sectorData).map(getSectorName);
-                    sectorChart.data.datasets[0].data = Object.values(sectorData);
-                    sectorChart.update('none');
-                }
-
-                // Performance Chart
-                const sortedStocks = Object.values(grouped).sort((a, b) => {
-                    const liveA = liveData[a.symbol];
-                    const liveB = liveData[b.symbol];
-                    const changeA = liveA && !liveA.isFallback ? ((liveA.price - a.avgPrice) / a.avgPrice) * 100 : -999;
-                    const changeB = liveB && !liveB.isFallback ? ((liveB.price - b.avgPrice) / b.avgPrice) * 100 : -999;
-                    return changeB - changeA;
-                }).slice(0, 5);
-
-                if (performanceChart) {
-                    performanceChart.data.labels = sortedStocks.map(s => s.symbol.split('.')[0]);
-                    performanceChart.data.datasets[0].data = sortedStocks.map(s => {
-                        const live = liveData[s.symbol];
-                        return live && !live.isFallback ? ((live.price - s.avgPrice) / s.avgPrice) * 100 : 0;
-                    });
-                    performanceChart.data.datasets[0].backgroundColor = sortedStocks.map(s => {
-                        const live = liveData[s.symbol];
-                        const change = live && !live.isFallback ? ((live.price - s.avgPrice) / s.avgPrice) * 100 : 0;
-                        return change >= 0 ? '#10b981' : '#ef4444';
-                    });
-                    performanceChart.update('none');
-                }
-            } catch (e) {
-                console.error('Chart update error:', e);
-            }
-        }
-
-        function getSectorName(sector) {
-            const names = {
-                bank: 'Bankacılık',
-                tech: 'Teknoloji',
-                energy: 'Enerji',
-                aviation: 'Havacılık',
-                defense: 'Savunma',
-                holding: 'Holding',
-                automotive: 'Otomotiv',
-                retail: 'Perakende',
-                other: 'Diğer'
-            };
-            return names[sector] || 'Diğer';
-        }
-
-        function formatCurrency(value) {
-            return '₺' + value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
-
-        function filterStocks() { renderTable(); }
-        function sortStocks() { renderTable(); }
-
-        function openAddModal() {
-            console.log('Opening add modal...');
-            const modal = document.getElementById('addModal');
-            if (modal) {
-                modal.classList.remove('modal-hidden');
-                modal.classList.add('modal-flex');
-                document.body.style.overflow = 'hidden';
-
-                const dateInput = document.getElementById('stockDate');
-                if (dateInput) dateInput.valueAsDate = new Date();
-            } else {
-                console.error('Add modal not found');
-            }
-        }
-
-        function closeAddModal() {
-            const modal = document.getElementById('addModal');
-            if (modal) {
-                modal.classList.add('modal-hidden');
-                modal.classList.remove('modal-flex');
-                document.body.style.overflow = '';
-            }
-        }
-
-        function showToast(message) {
-            const toast = document.getElementById('toast');
-            const toastMessage = document.getElementById('toastMessage');
-            if (toast && toastMessage) {
-                toastMessage.textContent = message;
-                toast.classList.remove('hidden');
-                setTimeout(() => toast.classList.add('hidden'), 3000);
-            }
-        }
-
-        function exportData() {
-            const exportObj = {
-                portfolio: portfolio,
-                liveData: liveData,
-                exportDate: new Date().toISOString(),
-                version: '3.1.0'
-            };
-
-            try {
-                const dataStr = JSON.stringify(exportObj, null, 2);
-                const dataBlob = new Blob([dataStr], { type: 'application/json' });
-                const url = URL.createObjectURL(dataBlob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `portfolio_backup_${new Date().toISOString().split('T')[0]}.json`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
-                showToast('Veriler dışa aktarıldı');
-            } catch (e) {
-                console.error('Export error:', e);
-                showToast('Dışa aktarma hatası');
-            }
-        }
-
-        function importData(input) {
-            const file = input.files[0];
-            if (!file) return;
-
-            const isValidTransaction = (item) => {
-                return item &&
-                    typeof item.symbol === 'string' && item.symbol.trim().length > 0 &&
-                    Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0 &&
-                    Number.isFinite(Number(item.price)) && Number(item.price) > 0 &&
-                    typeof item.date === 'string' && item.date.length > 0;
-            };
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const data = JSON.parse(e.target.result);
-                    console.log('Importing data:', data);
-
-                    let importedPortfolio = null;
-                    let importedLiveData = null;
-
-                    if (data.portfolio && Array.isArray(data.portfolio)) {
-                        importedPortfolio = data.portfolio;
-                        importedLiveData = data.liveData || {};
-                    }
-                    else if (Array.isArray(data)) {
-                        importedPortfolio = data;
-                    }
-                    else if (data.transactions && Array.isArray(data.transactions)) {
-                        importedPortfolio = data.transactions;
-                    }
-
-                    if (importedPortfolio && importedPortfolio.length > 0) {
-                        const sanitized = importedPortfolio
-                            .filter(isValidTransaction)
-                            .map(item => ({
-                                id: item.id || Date.now() + Math.floor(Math.random() * 100000),
-                                symbol: item.symbol.toUpperCase().trim(),
-                                quantity: Number(item.quantity),
-                                price: Number(item.price),
-                                date: item.date,
-                                sector: item.sector || 'other',
-                                timestamp: item.timestamp || new Date().toISOString()
-                            }));
-
-                        if (sanitized.length === 0) {
-                            alert('Geçerli işlem bulunamadı');
-                            return;
-                        }
-
-                        portfolio = sanitized;
-                        if (importedLiveData) liveData = importedLiveData;
-
-                        savePortfolio();
-                        localStorage.setItem('liveData', JSON.stringify(liveData));
-                        updateUI();
-                        showToast(`${portfolio.length} işlem içe aktarıldı`);
-                        console.log('Import successful:', portfolio.length, 'items');
-                    } else {
-                        alert('Geçersiz veya boş dosya formatı');
-                    }
-                } catch (err) {
-                    console.error('Import error:', err);
-                    alert('Dosya okuma hatası: ' + err.message);
-                }
-
-                input.value = '';
-            };
-
-            reader.onerror = (e) => {
-                console.error('File read error:', e);
-                alert('Dosya okunamadı');
-                input.value = '';
-            };
-
-            reader.readAsText(file);
-        }
-
-        // Event listeners
-        document.addEventListener('click', (e) => {
-            const addModal = document.getElementById('addModal');
-            const detailModal = document.getElementById('detailModal');
-
-            if (e.target === addModal) closeAddModal();
-            if (e.target === detailModal) closeDetailModal();
-        });
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                closeAddModal();
-                closeDetailModal();
-            }
-        });
-
-        console.log('Portfolio Terminal loaded with G/H column support');
-        console.log('Price data source: Google Sheet CSV (A=Symbol, E=Fiyat, G=Değişim Miktarı, H=Değişim Yüzdesi)');
-    </script>
+                    <div class="flex items-center gap-2 text-sm">
+                        <span id="dayChangePercent" class="mono font-bold">0,00%</span>
+                        <span class="text-gray-500">bugün</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stock Count Card -->
+            <div class="gradient-border">
+                <div class="gradient-border-inner p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <p class="text-gray-400 text-sm mono mb-1">AKTİF POZİSYON</p>
+                            <h2 class="text-3xl font-bold mono" id="positionCount">0</h2>
+                        </div>
+                        <div class="p-2 bg-pink-500/20 rounded-lg">
+                            <svg class="w-6 h-6 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm">
+                        <span class="text-gray-500">hisse senedi</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="glass rounded-xl p-6">
+                <h3 class="text-lg font-semibold mb-4 mono flex items-center gap-2">
+                    <span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                    Sektör Dağılımı
+                </h3>
+                <div class="relative h-64">
+                    <canvas id="sectorChart"></canvas>
+                </div>
+            </div>
+            <div class="glass rounded-xl p-6">
+                <h3 class="text-lg font-semibold mb-4 mono flex items-center gap-2">
+                    <span class="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></span>
+                    Performans Analizi
+                </h3>
+                <div class="relative h-64">
+                    <canvas id="performanceChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Portfolio Table -->
+        <div class="glass rounded-xl overflow-hidden mb-12">
+            <div class="p-6 border-b border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
+                <h3 class="text-xl font-bold mono">PORTFÖY DETAYLARI</h3>
+                <div class="flex gap-3 w-full md:w-auto">
+                    <div class="relative flex-1 md:w-64">
+                        <input type="text" id="searchInput" placeholder="Hisse ara..."
+                               class="w-full px-4 py-2 bg-black/30 border border-white/10 rounded-lg focus:outline-none focus:border-blue-500 transition mono text-sm"
+                               onkeyup="filterStocks()">
+                        <svg class="w-4 h-4 absolute right-3 top-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    </div>
+                    <select id="sortSelect" onchange="sortStocks()" class="px-4 py-2 bg-black/30 border border-white/10 rounded-lg focus:outline-none focus:border-blue-500 mono text-sm">
+                        <option value="value">Değere Göre</option>
+                        <option value="change">Değişime Göre</option>
+                        <option value="name">İsme Göre</option>
+                        <option value="date">Tarihe Göre</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="bg-white/5 text-gray-400 text-xs uppercase mono">
+                        <tr>
+                            <th class="px-6 py-4">Hisse</th>
+                            <th class="px-6 py-4 text-right">Miktar</th>
+                            <th class="px-6 py-4 text-right">Ort. Maliyet</th>
+                            <th class="px-6 py-4 text-right">Güncel Fiyat</th>
+                            <th class="px-6 py-4 text-right">Günlük Değişim</th>
+                            <th class="px-6 py-4 text-right">Toplam Değer</th>
+                            <th class="px-6 py-4 text-right">Kar/Zarar</th>
+                            <th class="px-6 py-4 text-center">Detay</th>
+                        </tr>
+                    </thead>
+                    <tbody id="portfolioTable" class="divide-y divide-white/5">
+                        <!-- Dynamic Content -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="emptyState" class="hidden p-12 text-center text-gray-500">
+                <svg class="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                <p class="mono">Henüz işlem eklenmemiş</p>
+                <button onclick="openAddModal()" class="mt-4 text-blue-400 hover:text-blue-300 text-sm">İlk işlemini ekle →</button>
+            </div>
+        </div>
+
+        <div class="h-12"></div>
+    </div>
+
+    <!-- Add Transaction Modal -->
+    <div id="addModal" class="fixed inset-0 z-50 items-center justify-center bg-black/80 backdrop-blur-sm overflow-y-auto modal-hidden">
+        <div class="glass rounded-2xl p-8 max-w-md w-full mx-4 my-8 modal-enter relative">
+            <button onclick="closeAddModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+
+            <h2 class="text-2xl font-bold mb-6 mono">Yeni İşlem Ekle</h2>
+
+            <form id="transactionForm" onsubmit="addTransaction(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2 mono">Hisse Sembolü</label>
+                    <input type="text" id="stockSymbol" required placeholder="örn: THYAO, GARAN, ASELS"
+                           class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono uppercase"
+                           oninput="this.value = this.value.toUpperCase()">
+                    <p class="text-xs text-gray-500 mt-1">Sembolü olduğu gibi girin (otomatik ekleme/çıkarma yapılmaz)</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2 mono">Miktar</label>
+                        <input type="number" id="stockQuantity" required min="1" step="1"
+                               class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2 mono">Birim Fiyat (₺)</label>
+                        <input type="number" id="stockPrice" required min="0.01" step="0.01"
+                               class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2 mono">İşlem Tarihi</label>
+                    <input type="date" id="stockDate" required
+                           class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono">
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2 mono">Sektör (Opsiyonel)</label>
+                    <select id="stockSector" class="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-lg focus:outline-none focus:border-blue-500 transition mono">
+                        <option value="other">Diğer</option>
+                        <option value="bank">Bankacılık</option>
+                        <option value="tech">Teknoloji</option>
+                        <option value="energy">Enerji</option>
+                        <option value="aviation">Havacılık</option>
+                        <option value="defense">Savunma</option>
+                        <option value="holding">Holding</option>
+                        <option value="automotive">Otomotiv</option>
+                        <option value="retail">Perakende</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 rounded-lg font-bold transition transform hover:scale-[1.02] mt-6">
+                    İşlemi Kaydet
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Stock Detail Modal -->
+    <div id="detailModal" class="fixed inset-0 z-50 items-center justify-center bg-black/80 backdrop-blur-sm overflow-y-auto modal-hidden">
+        <div class="glass rounded-2xl p-8 max-w-2xl w-full mx-4 my-8 modal-enter relative">
+            <button onclick="closeDetailModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+
+            <div id="detailContent">
+                <!-- Dynamic content -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-4 right-4 z-50 hidden">
+        <div class="glass px-6 py-4 rounded-lg border-l-4 border-green-500 flex items-center gap-3 toast">
+            <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            <span id="toastMessage" class="mono text-sm">İşlem başarılı</span>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
 </body>
 </html>
