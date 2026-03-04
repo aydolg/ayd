@@ -1,0 +1,114 @@
+/* Portfolio Terminal Pro Max Styles */
+
+body {
+    font-family: 'Inter', sans-serif;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    overflow-y: auto !important;
+    height: auto !important;
+}
+
+.mono { 
+    font-family: 'JetBrains Mono', monospace; 
+}
+
+.glass {
+    background: rgba(20, 20, 20, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.gradient-border {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1px;
+    border-radius: 12px;
+}
+
+.gradient-border-inner {
+    background: #1a1a1a;
+    border-radius: 11px;
+    height: 100%;
+}
+
+.stock-card {
+    transition: all 0.3s ease;
+    border-left: 3px solid transparent;
+}
+
+.stock-card:hover {
+    transform: translateX(5px);
+    border-left-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.positive { color: #10b981; }
+.negative { color: #ef4444; }
+
+.loading {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .5; }
+}
+
+.modal-enter { 
+    animation: modalIn 0.3s ease-out; 
+}
+
+@keyframes modalIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.toast {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+.update-btn {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.39);
+}
+
+.update-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.23);
+}
+
+.update-btn:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+.update-btn:disabled {
+    background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.last-update {
+    font-size: 0.75rem;
+    color: #6b7280;
+}
+
+.price-update {
+    animation: priceFlash 0.5s ease-out;
+}
+
+@keyframes priceFlash {
+    0% { background-color: rgba(59, 130, 246, 0.3); }
+    100% { background-color: transparent; }
+}
+
+.modal-hidden {
+    display: none !important;
+}
+
+.modal-flex {
+    display: flex !important;
+}
