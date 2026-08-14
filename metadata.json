@@ -1,0 +1,6 @@
+{
+  "name": "Portföy Takip Sistemi Pro",
+  "description": "Hisse, Fon, Bono ve Mevduat varlıkları için gelişmiş portföy takip, Modified Dietz getiri analizi ve AI destekli portföy danışmanlığı uygulaması.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
